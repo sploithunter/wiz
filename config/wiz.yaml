@@ -5,7 +5,7 @@
 # --- Global ---
 global:
   coding_agent_bridge_url: "http://127.0.0.1:4003"
-  bridge_data_dir: "~/.coding-agent-bridge"
+  bridge_data_dir: "~/.cin-interface"
   log_level: "info"
   timezone: "America/New_York"
 

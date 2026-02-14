@@ -9,6 +9,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WIZ_DIR="$(dirname "$SCRIPT_DIR")"
 CYCLE_TYPE="${1:-dev-cycle}"
 
+# --- Environment setup for launchd ---
+# launchd runs with minimal PATH/env. Source shell profile to get
+# API keys and other exports, then ensure essential paths are set.
+set +eu
+[ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile" 2>/dev/null
+[ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc" 2>/dev/null
+set -eu
+# Ensure essential tool paths (homebrew, pyenv, claude CLI)
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:$HOME/.pyenv/shims:$HOME/.pyenv/bin:$PATH"
+# Load .env file if present (overrides for API keys, tokens)
+if [ -f "$WIZ_DIR/.env" ]; then
+    set +u; set -a; source "$WIZ_DIR/.env"; set +a; set -u
+fi
+
 # Logging
 LOG_DIR="$WIZ_DIR/logs"
 mkdir -p "$LOG_DIR"
