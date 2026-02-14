@@ -23,11 +23,12 @@ log "=== Wiz Wake: $CYCLE_TYPE ==="
 # Check if bridge is running, start if not
 BRIDGE_DIR="${CODING_AGENT_BRIDGE_DIR:-$HOME/Documents/coding-agent-bridge}"
 BRIDGE_URL="${CODING_AGENT_BRIDGE_URL:-http://127.0.0.1:4003}"
+BRIDGE_DATA_DIR="${CODING_AGENT_BRIDGE_DATA_DIR:-$HOME/.cin-interface}"
 
 if ! curl -s "$BRIDGE_URL/health" > /dev/null 2>&1; then
     log "Starting Coding Agent Bridge..."
     cd "$BRIDGE_DIR"
-    node bin/cli.js server &
+    node bin/cli.js server --data-dir "$BRIDGE_DATA_DIR" &
     BRIDGE_PID=$!
     # Wait up to 15s for bridge to come alive
     for i in $(seq 1 15); do
