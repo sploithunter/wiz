@@ -1,0 +1,136 @@
+# ============================================================
+# Wiz Configuration
+# ============================================================
+
+# --- Global ---
+global:
+  coding_agent_bridge_url: "http://127.0.0.1:4003"
+  bridge_data_dir: "~/.coding-agent-bridge"
+  log_level: "info"
+  timezone: "America/New_York"
+
+# --- Repositories ---
+repos:
+  - name: "wiz"
+    path: "/Users/jason/Documents/wiz"
+    github: "sploithunter/wiz"
+    enabled: true
+    self_improve: true
+
+  - name: "harness-bench"
+    path: "/Users/jason/repos/harness-bench"
+    github: "sploithunter/harness-bench"
+    enabled: true
+
+  - name: "coding-agent-bridge"
+    path: "/Users/jason/repos/coding-agent-bridge"
+    github: "sploithunter/coding-agent-bridge"
+    enabled: true
+
+# --- Agents ---
+agents:
+  bug_hunter:
+    model: "codex"
+    max_issues_per_run: 10
+    min_severity: "P4"
+    require_poc: true
+    session_timeout: 600
+
+  bug_fixer:
+    model: "claude"
+    max_fixes_per_run: 5
+    stagnation_limit: 3
+    session_timeout: 600
+
+  reviewer:
+    model: "codex"
+    max_reviews_per_run: 10
+    max_review_cycles: 3
+    session_timeout: 300
+
+  feature_proposer:
+    model: "claude"
+    features_per_run: 1
+    auto_propose_features: true
+    require_approval: true
+    session_timeout: 900
+
+  blog_writer:
+    model: "claude"
+    auto_propose_topics: true
+    require_approval: true
+    output_dir: "~/Documents/blog-drafts"
+    session_timeout: 600
+
+  social_manager:
+    model: "claude"
+    social_posts_per_week: 3
+    platforms:
+      - "x"
+    require_approval: true
+    session_timeout: 300
+
+# --- Dev Cycle ---
+dev_cycle:
+  cycle_timeout: 3600
+  phases:
+    - "bug_hunt"
+    - "bug_fix"
+    - "review"
+  parallel_fixes: false
+
+# --- Scheduling ---
+schedule:
+  dev_cycle:
+    enabled: true
+    times:
+      - "07:00"
+    days: ["mon", "tue", "wed", "thu", "fri"]
+
+  feature_cycle:
+    enabled: true
+    times:
+      - "09:00"
+    days: ["mon", "wed", "fri"]
+
+  content_cycle:
+    enabled: true
+    times:
+      - "10:00"
+    days: ["tue", "thu"]
+
+# --- Worktrees ---
+worktrees:
+  base_dir: ".worktrees"
+  stale_days: 7
+  auto_cleanup_merged: true
+
+# --- File Locking ---
+locking:
+  ttl: 600
+  lock_dir: ".wiz/locks"
+
+# --- Escalation ---
+escalation:
+  max_issue_strikes: 3
+  max_file_strikes: 3
+  strike_file: ".wiz/strikes.json"
+
+# --- Memory ---
+memory:
+  short_term_max_lines: 50
+  session_log_retention_days: 30
+  long_term_dir: "memory/long-term"
+
+# --- Testing ---
+testing:
+  run_full_suite_before_pr: true
+  require_new_tests_for_fixes: true
+  require_new_tests_for_features: true
+  no_known_bugs_for_completion: true
+
+# --- Telegram ---
+telegram:
+  enabled: false
+  bot_token: ""
+  chat_id: ""
