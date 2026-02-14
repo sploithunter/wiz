@@ -1,6 +1,6 @@
 """Tests for session runner."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from wiz.bridge.client import BridgeClient
 from wiz.bridge.monitor import BridgeEventMonitor
@@ -203,3 +203,66 @@ class TestSessionRunner:
         )
         runner.run("test", "/tmp", "prompt", timeout=5)
         client.cleanup_all_sessions.assert_not_called()
+
+    @patch("wiz.bridge.runner.subprocess.run")
+    @patch("wiz.bridge.runner.shutil.which", return_value="/usr/bin/codex")
+    def test_codex_exec_success(self, mock_which, mock_run):
+        mock_run.return_value = MagicMock(returncode=0, stdout="done", stderr="")
+
+        runner = self._make_runner()
+        result = runner.run("test", "/tmp", "prompt", agent="codex", timeout=30)
+
+        assert result.success is True
+        assert result.reason == "completed"
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args[0][0][:3] == ["codex", "exec", "--full-auto"]
+
+    @patch("wiz.bridge.runner.shutil.which", return_value=None)
+    def test_codex_not_installed(self, mock_which):
+        runner = self._make_runner()
+        result = runner.run("test", "/tmp", "prompt", agent="codex")
+
+        assert result.success is False
+        assert result.reason == "codex_not_installed"
+
+    @patch("wiz.bridge.runner.subprocess.run")
+    @patch("wiz.bridge.runner.shutil.which", return_value="/usr/bin/codex")
+    def test_codex_exec_failure(self, mock_which, mock_run):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+
+        runner = self._make_runner()
+        result = runner.run("test", "/tmp", "prompt", agent="codex", timeout=30)
+
+        assert result.success is False
+        assert result.reason == "exit_code_1"
+
+    @patch("wiz.bridge.runner.subprocess.run")
+    @patch("wiz.bridge.runner.shutil.which", return_value="/usr/bin/codex")
+    def test_codex_exec_timeout(self, mock_which, mock_run):
+        import subprocess as sp
+        mock_run.side_effect = sp.TimeoutExpired(cmd="codex", timeout=5)
+
+        runner = self._make_runner()
+        result = runner.run("test", "/tmp", "prompt", agent="codex", timeout=5)
+
+        assert result.success is False
+        assert result.reason == "timeout"
+
+    @patch("wiz.bridge.runner.subprocess.run")
+    @patch("wiz.bridge.runner.shutil.which", return_value="/usr/bin/codex")
+    def test_codex_dispatches_not_bridge(self, mock_which, mock_run):
+        """Codex sessions should NOT go through the bridge."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        client = MagicMock(spec=BridgeClient)
+        monitor = MagicMock(spec=BridgeEventMonitor)
+        runner = SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=False,
+        )
+        runner.run("test", "/tmp", "prompt", agent="codex", timeout=30)
+
+        # Bridge should NOT be called for codex
+        client.create_session.assert_not_called()
+        client.send_prompt.assert_not_called()

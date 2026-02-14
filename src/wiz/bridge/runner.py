@@ -6,8 +6,12 @@ Pattern adapted from harness-bench cab_bridge.py:228-325.
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
+import tempfile
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from wiz.bridge.client import BridgeClient
@@ -61,14 +65,108 @@ class SessionRunner:
     ) -> SessionResult:
         """Run a complete session lifecycle.
 
-        1. Check server health
-        2. Start WebSocket monitor
-        3. Create session via REST
-        4. Wait for agent initialization
-        5. Send prompt
-        6. Wait for stop event OR poll status OR timeout
-        7. Return results
-        8. Delete session in finally block
+        For Claude: uses bridge (REST + WebSocket hooks) for session management.
+        For Codex: runs `codex exec` directly as a subprocess (codex has no
+        hook system, so the bridge can't detect completion).
+        """
+        if agent == "codex":
+            return self._run_codex_exec(name, cwd, prompt, model, timeout)
+        return self._run_bridge_session(name, cwd, prompt, agent, model, timeout)
+
+    def _run_codex_exec(
+        self,
+        name: str,
+        cwd: str,
+        prompt: str,
+        model: str | None = None,
+        timeout: float = 600,
+    ) -> SessionResult:
+        """Run codex in non-interactive exec mode.
+
+        codex exec runs the prompt and exits when done, so we just
+        wait for the subprocess to finish.
+        """
+        if not shutil.which("codex"):
+            return SessionResult(success=False, reason="codex_not_installed")
+
+        start_time = time.time()
+
+        # Write prompt to a temp file to avoid shell escaping issues
+        prompt_file = None
+        try:
+            prompt_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", prefix="wiz-codex-", delete=False,
+            )
+            prompt_file.write(prompt)
+            prompt_file.close()
+
+            cmd = ["codex", "exec", "--full-auto"]
+            if model:
+                cmd.extend(["--model", model])
+            # Read prompt from stdin via file
+            cmd.append("-")
+
+            logger.info("Running codex exec: %s (cwd=%s)", name, cwd)
+
+            # Build env without CLAUDECODE to avoid nested-session errors
+            import os
+            env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+
+            with open(prompt_file.name) as stdin_file:
+                proc = subprocess.run(
+                    cmd,
+                    cwd=cwd,
+                    stdin=stdin_file,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    env=env,
+                )
+
+            elapsed = time.time() - start_time
+            success = proc.returncode == 0
+
+            if success:
+                logger.info("codex exec completed in %.1fs", elapsed)
+            else:
+                logger.warning(
+                    "codex exec failed (rc=%d) in %.1fs: %s",
+                    proc.returncode, elapsed, proc.stderr[:500],
+                )
+
+            return SessionResult(
+                success=success,
+                reason="completed" if success else f"exit_code_{proc.returncode}",
+                elapsed=elapsed,
+            )
+
+        except subprocess.TimeoutExpired:
+            elapsed = time.time() - start_time
+            logger.warning("codex exec TIMEOUT after %ds", timeout)
+            return SessionResult(success=False, reason="timeout", elapsed=elapsed)
+
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error("codex exec error: %s", e)
+            return SessionResult(success=False, reason=str(e), elapsed=elapsed)
+
+        finally:
+            if prompt_file:
+                Path(prompt_file.name).unlink(missing_ok=True)
+
+    def _run_bridge_session(
+        self,
+        name: str,
+        cwd: str,
+        prompt: str,
+        agent: str = "claude",
+        model: str | None = None,
+        timeout: float = 0,
+    ) -> SessionResult:
+        """Run a session via the bridge (REST + WebSocket hooks).
+
+        Waits for a stop event or session status change to detect completion.
+        If timeout > 0, enforces a hard timeout; otherwise runs until done.
         """
         # Check server health
         if not self.client.health_check():
@@ -106,8 +204,11 @@ class SessionRunner:
 
             logger.info("Prompt sent, waiting for completion...")
 
-            # Wait for completion or timeout
-            while time.time() - start_time < timeout:
+            # Wait for completion (no timeout by default - agents run until done)
+            while True:
+                if timeout > 0 and time.time() - start_time >= timeout:
+                    break
+
                 # Check for stop event via WebSocket
                 if self.monitor.wait_for_stop(timeout=self.poll_interval):
                     logger.info("Stop event received")
@@ -121,11 +222,16 @@ class SessionRunner:
                         logger.info("Session became idle")
                         break
                     elif status == "offline":
-                        logger.warning("Session went offline")
+                        logger.info("Session went offline (agent exited)")
                         break
 
+                # Periodic progress log
+                elapsed = time.time() - start_time
+                if int(elapsed) % 60 == 0 and int(elapsed) > 0:
+                    logger.info("Still waiting... (%.0fs elapsed)", elapsed)
+
             elapsed = time.time() - start_time
-            timed_out = elapsed >= timeout and not self.monitor.stop_detected
+            timed_out = timeout > 0 and elapsed >= timeout and not self.monitor.stop_detected
 
             if timed_out:
                 logger.warning("TIMEOUT after %ds", timeout)

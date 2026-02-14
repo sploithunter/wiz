@@ -18,12 +18,12 @@ repos:
     self_improve: true
 
   - name: "harness-bench"
-    path: "/Users/jason/repos/harness-bench"
-    github: "sploithunter/harness-bench"
+    path: "/Users/jason/Documents/harness-bench"
+    github: "sploithunter/harnesss-bench"
     enabled: true
 
   - name: "coding-agent-bridge"
-    path: "/Users/jason/repos/coding-agent-bridge"
+    path: "/Users/jason/Documents/coding-agent-bridge"
     github: "sploithunter/coding-agent-bridge"
     enabled: true
 

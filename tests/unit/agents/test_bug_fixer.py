@@ -70,7 +70,7 @@ class TestBugFixerAgent:
         issues = [{"number": 1, "title": "[P2] Bug", "body": "details"}]
         agent.run("/tmp", issues=issues)
         github.update_labels.assert_called_once_with(
-            1, add=["needs-review"], remove=["needs-fix"]
+            1, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
         )
 
     def test_max_fixes_per_run(self):

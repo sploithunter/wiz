@@ -88,7 +88,18 @@ class BugFixerAgent(BaseAgent):
         """Override run to process multiple issues with worktrees and locks."""
         issues = kwargs.get("issues", [])
         if not issues:
-            issues = self.github.list_issues(labels=["needs-fix"])
+            # Pick up new bugs (wiz-bug) and issues sent back from review (needs-fix)
+            issues = self.github.list_issues(labels=["wiz-bug"])
+            issues += self.github.list_issues(labels=["needs-fix"])
+            # Deduplicate by issue number
+            seen = set()
+            unique = []
+            for issue in issues:
+                num = issue.get("number")
+                if num not in seen:
+                    seen.add(num)
+                    unique.append(issue)
+            issues = unique
 
         # Sort by priority (P0 first)
         issues.sort(key=_extract_priority)
@@ -103,30 +114,31 @@ class BugFixerAgent(BaseAgent):
             number = issue.get("number", 0)
             stagnation = StagnationDetector(limit=self.fixer_config.stagnation_limit)
 
-            # Try to acquire locks (simplified: lock the issue itself)
+            # Try to acquire locks if available
             lock_key = f"issue-{number}"
-            if not self.locks.acquire(lock_key, owner):
+            if self.locks and not self.locks.acquire(lock_key, owner):
                 logger.info("Issue #%d locked, skipping", number)
                 results.append({"issue": number, "skipped": True, "reason": "locked"})
                 continue
 
             try:
-                # Create worktree
-                wt_path = self.worktree.create("fix", number)
+                # Create worktree if available, otherwise work in main dir
+                if self.worktree:
+                    work_dir = str(self.worktree.create("fix", number))
+                else:
+                    work_dir = cwd
 
                 # Build and run
                 prompt = self.build_prompt(issue=issue)
                 result = self.runner.run(
                     name=f"wiz-bug-fixer-{number}",
-                    cwd=str(wt_path),
+                    cwd=work_dir,
                     prompt=prompt,
                     agent=self.agent_type,
                     timeout=timeout,
                 )
 
                 if result.success:
-                    # Check for stagnation (no git diff)
-                    # In real use, we'd check git diff; here we trust the agent
                     if stagnation.check(files_changed=result.success):
                         self.github.add_comment(
                             number, "Fix stalled: no progress after multiple attempts"
@@ -136,17 +148,18 @@ class BugFixerAgent(BaseAgent):
                         )
                         results.append({"issue": number, "stalled": True})
                     else:
-                        # Push and update labels
-                        self.worktree.push("fix", number)
+                        if self.worktree:
+                            self.worktree.push("fix", number)
                         self.github.add_comment(number, "Fix applied, ready for review")
                         self.github.update_labels(
-                            number, add=["needs-review"], remove=["needs-fix"]
+                            number, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
                         )
                         results.append({"issue": number, "fixed": True})
                 else:
                     results.append({"issue": number, "failed": True, "reason": result.reason})
 
             finally:
-                self.locks.release(lock_key, owner)
+                if self.locks:
+                    self.locks.release(lock_key, owner)
 
         return {"issues_processed": len(results), "results": results}

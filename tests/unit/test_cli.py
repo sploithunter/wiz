@@ -1,5 +1,7 @@
 """Tests for CLI commands."""
 
+from unittest.mock import MagicMock, patch
+
 from click.testing import CliRunner
 
 from wiz.cli import main
@@ -45,7 +47,12 @@ class TestCLI:
         result = runner.invoke(main, ["schedule", "status"])
         assert result.exit_code == 0
 
-    def test_content_cycle_runs(self):
+    @patch("wiz.orchestrator.content_pipeline.ContentCyclePipeline")
+    @patch("wiz.config.loader.load_config")
+    def test_content_cycle_runs(self, mock_load, mock_pipeline_cls):
+        mock_state = MagicMock()
+        mock_state.summary.return_value = "content cycle complete"
+        mock_pipeline_cls.return_value.run.return_value = mock_state
         runner = CliRunner()
         result = runner.invoke(main, ["run", "content-cycle"])
         assert result.exit_code == 0
