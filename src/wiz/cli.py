@@ -149,17 +149,34 @@ def schedule_install(ctx: click.Context) -> None:
     wiz_dir = ctx.obj["config_path"].parent.parent
     scheduler = LaunchdScheduler(wiz_dir)
 
-    schedules = [
-        ("com.wiz.dev-cycle", "dev-cycle", config.schedule.dev_cycle),
-        ("com.wiz.feature-cycle", "feature-cycle", config.schedule.feature_cycle),
-        ("com.wiz.content-cycle", "content-cycle", config.schedule.content_cycle),
+    # Per-phase schedules override the combined dev_cycle if present
+    phase_schedules = [
+        ("com.wiz.bug-hunt", "dev-cycle", config.schedule.bug_hunt, ["--phase", "bug_hunt"]),
+        ("com.wiz.bug-fix", "dev-cycle", config.schedule.bug_fix, ["--phase", "bug_fix"]),
+        ("com.wiz.review", "dev-cycle", config.schedule.review, ["--phase", "review"]),
     ]
+    has_phase_schedules = any(entry is not None for _, _, entry, _ in phase_schedules)
 
-    for label, cycle_type, entry in schedules:
+    if has_phase_schedules:
+        # Use per-phase scheduling (staggered)
+        schedules = [(l, c, e, a) for l, c, e, a in phase_schedules if e is not None]
+    else:
+        # Fall back to combined dev_cycle
+        schedules = [
+            ("com.wiz.dev-cycle", "dev-cycle", config.schedule.dev_cycle, []),
+        ]
+
+    # Always add feature and content cycles
+    schedules.extend([
+        ("com.wiz.feature-cycle", "feature-cycle", config.schedule.feature_cycle, []),
+        ("com.wiz.content-cycle", "content-cycle", config.schedule.content_cycle, []),
+    ])
+
+    for label, cycle_type, entry, extra_args in schedules:
         if not entry.enabled:
             click.echo(f"Skipping {label} (disabled)")
             continue
-        plist = scheduler.generate_plist(label, cycle_type, entry)
+        plist = scheduler.generate_plist(label, cycle_type, entry, extra_args or None)
         if scheduler.install(label, plist):
             click.echo(f"Installed {label}")
         else:

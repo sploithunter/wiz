@@ -91,6 +91,9 @@ class ScheduleEntry(BaseModel):
 
 class ScheduleConfig(BaseModel):
     dev_cycle: ScheduleEntry = Field(default_factory=ScheduleEntry)
+    bug_hunt: ScheduleEntry | None = None
+    bug_fix: ScheduleEntry | None = None
+    review: ScheduleEntry | None = None
     feature_cycle: ScheduleEntry = Field(
         default_factory=lambda: ScheduleEntry(times=["09:00"], days=["mon", "wed", "fri"])
     )

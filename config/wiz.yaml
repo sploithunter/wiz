@@ -85,11 +85,37 @@ dev_cycle:
   parallel_fixes: false
 
 # --- Scheduling ---
+# Per-phase scheduling (staggered, 2-hour minimum between runs).
+# Bug hunt and review (Codex) on odd hours, bug fix (Claude) on even hours.
 schedule:
-  dev_cycle:
+  bug_hunt:
     enabled: true
     times:
       - "07:00"
+      - "09:00"
+      - "11:00"
+      - "13:00"
+      - "15:00"
+    days: ["mon", "tue", "wed", "thu", "fri"]
+
+  bug_fix:
+    enabled: true
+    times:
+      - "08:00"
+      - "10:00"
+      - "12:00"
+      - "14:00"
+      - "16:00"
+    days: ["mon", "tue", "wed", "thu", "fri"]
+
+  review:
+    enabled: true
+    times:
+      - "09:00"
+      - "11:00"
+      - "13:00"
+      - "15:00"
+      - "17:00"
     days: ["mon", "tue", "wed", "thu", "fri"]
 
   feature_cycle:

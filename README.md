@@ -151,7 +151,26 @@ wiz schedule uninstall
 
 Schedules are defined in `config/wiz.yaml` under the `schedule` key. The scheduler generates launchd plists with `StartCalendarInterval` entries and installs them in `~/Library/LaunchAgents/`.
 
-The `scripts/wake.sh` entry point handles launchd's minimal environment by sourcing shell profiles and setting up PATH, API keys, and pyenv.
+**Minimum 2-hour spacing between runs.** Agent sessions (Claude up to ~40min, Codex up to ~75min) plus pipeline overhead means a single run can take up to 110 minutes. Never schedule runs less than 2 hours apart.
+
+Phases can be scheduled independently for better staggering:
+
+```yaml
+schedule:
+  bug_hunt:   # odd hours
+    times: ["07:00", "09:00", "11:00", "13:00", "15:00"]
+    days: ["mon", "tue", "wed", "thu", "fri"]
+  bug_fix:    # even hours
+    times: ["08:00", "10:00", "12:00", "14:00", "16:00"]
+    days: ["mon", "tue", "wed", "thu", "fri"]
+  review:     # odd hours (after bug_fix)
+    times: ["09:00", "11:00", "13:00", "15:00", "17:00"]
+    days: ["mon", "tue", "wed", "thu", "fri"]
+```
+
+When per-phase schedules (`bug_hunt`, `bug_fix`, `review`) are present, they override the combined `dev_cycle` schedule. This staggers the work so bug_hunt finds issues, bug_fix picks them up next hour, and review follows the hour after.
+
+The `scripts/wake.sh` entry point handles launchd's minimal environment by sourcing shell profiles and setting up PATH, API keys, and pyenv. It also re-anchors the `pip install -e` to the main repo on every launch (sub-agents may redirect it from worktrees).
 
 ### Logging
 

@@ -8,6 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WIZ_DIR="$(dirname "$SCRIPT_DIR")"
 CYCLE_TYPE="${1:-dev-cycle}"
+shift || true
+EXTRA_ARGS="$*"
 
 # --- Environment setup for launchd ---
 # launchd runs with minimal PATH/env. Source shell profile to get
@@ -72,8 +74,8 @@ pip3 install -e "$WIZ_DIR" --break-system-packages -q 2>&1 | tee -a "$LOG_FILE" 
 
 # Run the requested cycle
 cd "$WIZ_DIR"
-log "Running: wiz run $CYCLE_TYPE"
-wiz run "$CYCLE_TYPE" 2>&1 | tee -a "$LOG_FILE"
+log "Running: wiz run $CYCLE_TYPE $EXTRA_ARGS"
+wiz run "$CYCLE_TYPE" $EXTRA_ARGS 2>&1 | tee -a "$LOG_FILE"
 EXIT_CODE=${PIPESTATUS[0]}
 
 log "Cycle complete (exit code: $EXIT_CODE)"

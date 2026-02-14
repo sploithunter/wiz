@@ -24,8 +24,7 @@ PLIST_TEMPLATE = """\
     <string>{label}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{script}</string>
-        <string>{cycle_type}</string>
+{program_args}
     </array>
     <key>StartCalendarInterval</key>
     <array>
@@ -67,7 +66,11 @@ class LaunchdScheduler:
         self.script = self.wiz_dir / "scripts" / "wake.sh"
 
     def generate_plist(
-        self, label: str, cycle_type: str, schedule: ScheduleEntry
+        self,
+        label: str,
+        cycle_type: str,
+        schedule: ScheduleEntry,
+        extra_args: list[str] | None = None,
     ) -> str:
         """Generate plist XML content."""
         intervals = []
@@ -82,10 +85,14 @@ class LaunchdScheduler:
                         )
                     )
 
+        args = [str(self.script), cycle_type] + (extra_args or [])
+        program_args = "\n".join(
+            f"        <string>{a}</string>" for a in args
+        )
+
         return PLIST_TEMPLATE.format(
             label=label,
-            script=self.script,
-            cycle_type=cycle_type,
+            program_args=program_args,
             intervals="\n".join(intervals),
             log_dir=self.log_dir,
             working_dir=self.wiz_dir,
