@@ -55,7 +55,8 @@ class TestGitHubIssues:
     def test_update_labels(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
         assert self.gh.update_labels(1, add=["needs-fix"], remove=["needs-triage"]) is True
-        assert mock_run.call_count == 2  # One for add, one for remove
+        # ensure_labels (1 call) + add-label + remove-label = 3
+        assert mock_run.call_count == 3
 
     @patch("wiz.coordination.github_issues.subprocess.run")
     def test_close_issue(self, mock_run):

@@ -15,8 +15,11 @@ class GitHubIssues:
 
     def __init__(self, repo: str) -> None:
         self.repo = repo
+        self._ensured_labels: set[str] = set()
 
-    def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
+    def _run_gh(
+        self, args: list[str], check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
         cmd = ["gh"] + args + ["-R", self.repo]
         return subprocess.run(
             cmd,
@@ -26,8 +29,29 @@ class GitHubIssues:
             timeout=30,
         )
 
-    def create_issue(self, title: str, body: str, labels: list[str] | None = None) -> str | None:
+    def ensure_labels(self, labels: list[str]) -> None:
+        """Create labels on the repo if they don't exist."""
+        for label in labels:
+            if label in self._ensured_labels:
+                continue
+            try:
+                subprocess.run(
+                    ["gh", "label", "create", label,
+                     "-R", self.repo, "--force"],
+                    capture_output=True, text=True,
+                    check=True, timeout=15,
+                )
+                self._ensured_labels.add(label)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                logger.warning("Could not ensure label %r exists", label)
+
+    def create_issue(
+        self, title: str, body: str,
+        labels: list[str] | None = None,
+    ) -> str | None:
         """Create an issue. Returns issue URL or None."""
+        if labels:
+            self.ensure_labels(labels)
         args = ["issue", "create", "--title", title, "--body", body]
         if labels:
             args.extend(["--label", ",".join(labels)])
@@ -74,8 +98,10 @@ class GitHubIssues:
         """Add or remove labels from an issue."""
         try:
             if add:
+                self.ensure_labels(add)
                 self._run_gh(
-                    ["issue", "edit", str(issue_number), "--add-label", ",".join(add)]
+                    ["issue", "edit", str(issue_number),
+                     "--add-label", ",".join(add)]
                 )
             if remove:
                 self._run_gh(
