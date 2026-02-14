@@ -27,6 +27,7 @@ Bug Hunt (Codex)  →  Bug Fix (Claude)  →  Review (Codex)
 - `wiz-bug` — New bug found by hunter
 - `needs-fix` — Sent back from review for rework
 - `needs-review` — Fix applied, awaiting review
+- `wiz-claimed-by-{machine_id}` — Distributed lock claim (multi-machine)
 - `fix-stalled` — Circuit breaker triggered (no progress)
 - `escalated-to-human` — Max review cycles reached, needs human
 
@@ -48,7 +49,8 @@ Multiple safety mechanisms prevent agents from stepping on each other:
 
 | Mechanism | What It Does |
 |-----------|-------------|
-| **File locks** | Per-issue locks with TTL prevent two agents from fixing the same issue |
+| **Distributed locks** | GitHub labels (`wiz-claimed-by-{machine_id}`) prevent multiple machines from picking up the same issue |
+| **File locks** | Per-issue locks with TTL prevent two agents on the same machine from fixing the same issue |
 | **Label state machine** | Issues transition through labels; agents only pick up issues matching their phase |
 | **Duplicate detection** | Bug hunter receives existing issues in its prompt to avoid duplicates |
 | **Stagnation detector** | Circuit-breaks after N consecutive no-change attempts |
@@ -89,6 +91,9 @@ pip install -e ".[dev]"
 Edit `config/wiz.yaml`:
 
 ```yaml
+global:
+  machine_id: "macbook-1"  # Enables distributed locking across machines
+
 repos:
   - name: "my-repo"
     path: "/path/to/repo"
@@ -244,7 +249,8 @@ mypy src/wiz/
 - **PRs are never auto-merged** — Human review required for all changes
 - **Three-strike escalation** — Issues that fail repeatedly get escalated with Telegram alerts
 - **Self-improvement guard** — When Wiz works on its own repo, protected files (`config/wiz.yaml`, `CLAUDE.md`, `schema.py`, `escalation.py`) require human PR approval
-- **File locking** — Prevents concurrent modification conflicts
+- **Distributed locking** — GitHub label-based claims prevent cross-machine conflicts
+- **File locking** — Prevents concurrent modification conflicts on the same machine
 - **Stagnation circuit breaker** — Stops agents that aren't making progress
 - **Loop cap** — Fix-review cycles are capped to prevent infinite loops
 
@@ -271,6 +277,7 @@ src/wiz/
 ├── coordination/    # Multi-agent coordination
 │   ├── github_issues.py
 │   ├── github_prs.py
+│   ├── distributed_lock.py
 │   ├── file_lock.py
 │   ├── worktree.py
 │   ├── strikes.py
