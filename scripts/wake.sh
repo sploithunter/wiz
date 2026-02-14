@@ -27,11 +27,17 @@ BRIDGE_URL="${CODING_AGENT_BRIDGE_URL:-http://127.0.0.1:4003}"
 if ! curl -s "$BRIDGE_URL/health" > /dev/null 2>&1; then
     log "Starting Coding Agent Bridge..."
     cd "$BRIDGE_DIR"
-    npm start &
+    node bin/cli.js server &
     BRIDGE_PID=$!
-    sleep 5
+    # Wait up to 15s for bridge to come alive
+    for i in $(seq 1 15); do
+        if curl -s "$BRIDGE_URL/health" > /dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
     if ! curl -s "$BRIDGE_URL/health" > /dev/null 2>&1; then
-        log "ERROR: Bridge failed to start"
+        log "ERROR: Bridge failed to start after 15s"
         exit 1
     fi
     log "Bridge started (PID: $BRIDGE_PID)"
@@ -39,6 +45,9 @@ else
     log "Bridge already running"
     BRIDGE_PID=""
 fi
+
+# Stale session cleanup happens automatically inside Wiz's SessionRunner
+# on first run (cleanup_stale_sessions). No separate step needed here.
 
 # Run the requested cycle
 cd "$WIZ_DIR"

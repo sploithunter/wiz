@@ -8,10 +8,13 @@ from wiz.bridge.runner import SessionRunner
 
 
 class TestSessionRunner:
-    def _make_runner(self, client=None, monitor=None):
+    def _make_runner(self, client=None, monitor=None, cleanup_on_start=False):
         client = client or MagicMock(spec=BridgeClient)
         monitor = monitor or MagicMock(spec=BridgeEventMonitor)
-        return SessionRunner(client, monitor, init_wait=0.01, poll_interval=0.01)
+        return SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=cleanup_on_start,
+        )
 
     def test_full_lifecycle_success(self):
         client = MagicMock(spec=BridgeClient)
@@ -35,7 +38,10 @@ class TestSessionRunner:
 
         client.get_session.side_effect = fake_get_session
 
-        runner = SessionRunner(client, monitor, init_wait=0.01, poll_interval=0.01)
+        runner = SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=False,
+        )
         result = runner.run("test", "/tmp", "do stuff", timeout=5)
 
         assert result.success is True
@@ -91,7 +97,10 @@ class TestSessionRunner:
         monitor.wait_for_stop.return_value = False
         monitor.events = []
 
-        runner = SessionRunner(client, monitor, init_wait=0.01, poll_interval=0.01)
+        runner = SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=False,
+        )
         result = runner.run("test", "/tmp", "prompt", timeout=0.05)
 
         assert result.success is False
@@ -109,7 +118,10 @@ class TestSessionRunner:
         monitor.wait_for_stop.return_value = True
         monitor.events = [{"type": "event", "data": {"type": "stop"}}]
 
-        runner = SessionRunner(client, monitor, init_wait=0.01, poll_interval=0.01)
+        runner = SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=False,
+        )
         result = runner.run("test", "/tmp", "prompt")
 
         assert result.success is True
@@ -127,7 +139,10 @@ class TestSessionRunner:
         monitor.wait_for_stop.return_value = False
         monitor.events = []
 
-        runner = SessionRunner(client, monitor, init_wait=0.01, poll_interval=0.01)
+        runner = SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=False,
+        )
         result = runner.run("test", "/tmp", "prompt", timeout=5)
 
         assert result.success is True
@@ -146,3 +161,45 @@ class TestSessionRunner:
         except RuntimeError:
             pass
         client.delete_session.assert_called_once_with("sess-1")
+
+    def test_startup_cleanup_runs_once(self):
+        client = MagicMock(spec=BridgeClient)
+        client.health_check.return_value = True
+        client.create_session.return_value = "sess-1"
+        client.send_prompt.return_value = True
+        client.get_session.return_value = {"status": "idle"}
+        client.cleanup_all_sessions.return_value = 5
+
+        monitor = MagicMock(spec=BridgeEventMonitor)
+        monitor.stop_detected = False
+        monitor.wait_for_stop.return_value = False
+        monitor.events = []
+
+        runner = SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=True,
+        )
+        runner.run("test", "/tmp", "prompt", timeout=5)
+        runner.run("test2", "/tmp", "prompt2", timeout=5)
+
+        # cleanup_all_sessions called once (first run only)
+        client.cleanup_all_sessions.assert_called_once()
+
+    def test_startup_cleanup_disabled(self):
+        client = MagicMock(spec=BridgeClient)
+        client.health_check.return_value = True
+        client.create_session.return_value = "sess-1"
+        client.send_prompt.return_value = True
+        client.get_session.return_value = {"status": "idle"}
+
+        monitor = MagicMock(spec=BridgeEventMonitor)
+        monitor.stop_detected = False
+        monitor.wait_for_stop.return_value = False
+        monitor.events = []
+
+        runner = SessionRunner(
+            client, monitor, init_wait=0.01, poll_interval=0.01,
+            cleanup_on_start=False,
+        )
+        runner.run("test", "/tmp", "prompt", timeout=5)
+        client.cleanup_all_sessions.assert_not_called()

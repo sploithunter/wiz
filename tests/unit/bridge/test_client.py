@@ -133,3 +133,45 @@ class TestBridgeClient:
         resp.raise_for_status.side_effect = requests.HTTPError("500")
         mock_post.return_value = resp
         assert self.client.create_session("test", "/tmp") is None
+
+    @patch("wiz.bridge.client.requests.delete")
+    @patch("wiz.bridge.client.requests.get")
+    def test_cleanup_all_sessions(self, mock_get, mock_delete):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}],
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_delete.return_value = MagicMock(status_code=200)
+        mock_delete.return_value.raise_for_status = MagicMock()
+
+        count = self.client.cleanup_all_sessions()
+        assert count == 3
+        assert mock_delete.call_count == 3
+
+    @patch("wiz.bridge.client.requests.get")
+    def test_cleanup_all_sessions_empty(self, mock_get):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [],
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+        assert self.client.cleanup_all_sessions() == 0
+
+    @patch("wiz.bridge.client.requests.delete")
+    @patch("wiz.bridge.client.requests.get")
+    def test_cleanup_partial_failure(self, mock_get, mock_delete):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"id": "s1"}, {"id": "s2"}],
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+        # First delete succeeds, second fails
+        ok_resp = MagicMock(status_code=200)
+        ok_resp.raise_for_status = MagicMock()
+        fail_resp = MagicMock()
+        fail_resp.raise_for_status.side_effect = requests.HTTPError("500")
+        mock_delete.side_effect = [ok_resp, fail_resp]
+
+        count = self.client.cleanup_all_sessions()
+        assert count == 1

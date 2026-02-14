@@ -27,12 +27,28 @@ class SessionRunner:
         init_wait: float = 5.0,
         poll_interval: float = 2.0,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        cleanup_on_start: bool = True,
     ) -> None:
         self.client = client
         self.monitor = monitor
         self.init_wait = init_wait
         self.poll_interval = poll_interval
         self.on_event = on_event
+        self._cleaned_up = False
+        self._cleanup_on_start = cleanup_on_start
+
+    def cleanup_stale_sessions(self) -> int:
+        """Delete all stale sessions from the bridge.
+
+        Called automatically on first run() to ensure a clean slate.
+        """
+        if self._cleaned_up:
+            return 0
+        self._cleaned_up = True
+        count = self.client.cleanup_all_sessions()
+        if count > 0:
+            logger.info("Startup cleanup: removed %d stale sessions", count)
+        return count
 
     def run(
         self,
@@ -57,6 +73,10 @@ class SessionRunner:
         # Check server health
         if not self.client.health_check():
             return SessionResult(success=False, reason="bridge_unavailable")
+
+        # Cleanup stale sessions on first run
+        if self._cleanup_on_start:
+            self.cleanup_stale_sessions()
 
         # Start WebSocket monitor
         self.monitor.clear()

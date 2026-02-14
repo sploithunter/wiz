@@ -172,3 +172,24 @@ class BridgeClient:
         except Exception as e:
             logger.warning("Failed to delete session: %s", e)
             return False
+
+    def cleanup_all_sessions(self) -> int:
+        """Delete all sessions on the bridge. Returns count deleted.
+
+        Called at startup to ensure a clean slate — any sessions from
+        prior runs are stale (no backing tmux processes).
+        """
+        sessions = self.list_sessions()
+        if not sessions:
+            return 0
+
+        deleted = 0
+        for s in sessions:
+            sid = s.get("id")
+            if sid and self.delete_session(sid):
+                deleted += 1
+
+        logger.info(
+            "Cleaned up %d/%d stale sessions", deleted, len(sessions),
+        )
+        return deleted
