@@ -27,6 +27,11 @@ repos:
     github: "sploithunter/coding-agent-bridge"
     enabled: true
 
+  - name: "solar"
+    path: "/Users/jason/Documents/solar"
+    github: "sploithunter/solar"
+    enabled: true
+
 # --- Agents ---
 agents:
   bug_hunter:
@@ -53,7 +58,7 @@ agents:
     features_per_run: 1
     auto_propose_features: true
     require_approval: true
-    session_timeout: 900
+    session_timeout: 6600  # 110 min - Claude can run up to ~40min, Codex ~75min
 
   blog_writer:
     model: "claude"
@@ -72,7 +77,7 @@ agents:
 
 # --- Dev Cycle ---
 dev_cycle:
-  cycle_timeout: 3600
+  cycle_timeout: 6600  # 110 min - floor for schedule spacing is 2 hours
   phases:
     - "bug_hunt"
     - "bug_fix"
