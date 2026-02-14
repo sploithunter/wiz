@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from wiz.config.schema import ScheduleEntry
 from wiz.orchestrator.scheduler import LaunchdScheduler
 
@@ -56,6 +58,42 @@ class TestLaunchdScheduler:
     def test_status_empty(self, tmp_path: Path):
         scheduler = LaunchdScheduler(tmp_path)
         assert scheduler.status() == []
+
+    def test_invalid_time_format_raises(self, tmp_path: Path):
+        scheduler = LaunchdScheduler(tmp_path)
+        entry = ScheduleEntry(times=["not-a-time"], days=["mon"])
+        with pytest.raises(ValueError, match="hour is not a number"):
+            scheduler.generate_plist("test", "dev-cycle", entry)
+
+    def test_invalid_time_hour_out_of_range(self, tmp_path: Path):
+        scheduler = LaunchdScheduler(tmp_path)
+        entry = ScheduleEntry(times=["25:00"], days=["mon"])
+        with pytest.raises(ValueError, match="hour must be 0-23"):
+            scheduler.generate_plist("test", "dev-cycle", entry)
+
+    def test_invalid_time_minute_out_of_range(self, tmp_path: Path):
+        scheduler = LaunchdScheduler(tmp_path)
+        entry = ScheduleEntry(times=["09:60"], days=["mon"])
+        with pytest.raises(ValueError, match="minute must be 0-59"):
+            scheduler.generate_plist("test", "dev-cycle", entry)
+
+    def test_invalid_time_too_many_colons(self, tmp_path: Path):
+        scheduler = LaunchdScheduler(tmp_path)
+        entry = ScheduleEntry(times=["09:00:00"], days=["mon"])
+        with pytest.raises(ValueError, match="expected 'HH:MM' or 'H'"):
+            scheduler.generate_plist("test", "dev-cycle", entry)
+
+    def test_invalid_day_name_raises(self, tmp_path: Path):
+        scheduler = LaunchdScheduler(tmp_path)
+        entry = ScheduleEntry(times=["09:00"], days=["Monday"])
+        with pytest.raises(ValueError, match="Invalid day name 'Monday'"):
+            scheduler.generate_plist("test", "dev-cycle", entry)
+
+    def test_invalid_day_among_valid_days_raises(self, tmp_path: Path):
+        scheduler = LaunchdScheduler(tmp_path)
+        entry = ScheduleEntry(times=["09:00"], days=["mon", "funday"])
+        with pytest.raises(ValueError, match="Invalid day name 'funday'"):
+            scheduler.generate_plist("test", "dev-cycle", entry)
 
     def test_status_with_plists(self, tmp_path: Path):
         plist_dir = tmp_path / "launchd"
