@@ -1,8 +1,9 @@
 """Tests for dev cycle pipeline."""
 
+from unittest import mock
 from unittest.mock import MagicMock, patch
 
-from wiz.config.schema import DevCycleConfig, WizConfig
+from wiz.config.schema import DevCycleConfig, GlobalConfig, WizConfig
 from wiz.notifications.telegram import TelegramNotifier
 from wiz.orchestrator.pipeline import DevCyclePipeline
 
@@ -77,3 +78,42 @@ class TestDevCyclePipeline:
         assert len(state.phases) == 1
         assert state.phases[0].success is False
         assert "bridge exploded" in state.phases[0].data["error"]
+
+    @patch("wiz.orchestrator.pipeline.DistributedLockManager")
+    @patch("wiz.orchestrator.pipeline.BugFixerAgent")
+    @patch("wiz.orchestrator.pipeline.SessionRunner")
+    @patch("wiz.orchestrator.pipeline.BridgeClient")
+    @patch("wiz.orchestrator.pipeline.BridgeEventMonitor")
+    def test_distributed_lock_created_when_machine_id_set(
+        self, mock_monitor, mock_client, mock_runner, mock_fixer, mock_dlock
+    ):
+        config = WizConfig(
+            **{"global": GlobalConfig(machine_id="mac-1")},
+            repos=[{"name": "t", "path": "/tmp/t", "github": "u/t", "enabled": True}],
+            dev_cycle=DevCycleConfig(phases=["bug_fix"]),
+        )
+        notifier = MagicMock(spec=TelegramNotifier)
+        pipeline = DevCyclePipeline(config, notifier)
+
+        mock_dlock_inst = MagicMock()
+        mock_dlock_inst.cleanup_stale.return_value = 0
+        mock_dlock.return_value = mock_dlock_inst
+        mock_fixer.return_value = MagicMock(run=MagicMock(return_value={"issues_processed": 0}))
+
+        pipeline.run_repo(config.repos[0])
+        mock_dlock.assert_called_once_with(mock.ANY, "mac-1")
+        mock_dlock_inst.cleanup_stale.assert_called_once()
+
+    @patch("wiz.orchestrator.pipeline.BugFixerAgent")
+    @patch("wiz.orchestrator.pipeline.SessionRunner")
+    @patch("wiz.orchestrator.pipeline.BridgeClient")
+    @patch("wiz.orchestrator.pipeline.BridgeEventMonitor")
+    def test_distributed_lock_not_created_when_no_machine_id(
+        self, mock_monitor, mock_client, mock_runner, mock_fixer
+    ):
+        pipeline, config = self._make_pipeline(phases=["bug_fix"])
+        mock_fixer.return_value = MagicMock(run=MagicMock(return_value={"issues_processed": 0}))
+
+        with patch("wiz.orchestrator.pipeline.DistributedLockManager") as mock_dlock:
+            pipeline.run_repo(config.repos[0])
+            mock_dlock.assert_not_called()

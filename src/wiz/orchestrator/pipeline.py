@@ -17,6 +17,7 @@ from wiz.bridge.client import BridgeClient
 from wiz.bridge.monitor import BridgeEventMonitor
 from wiz.bridge.runner import SessionRunner
 from wiz.config.schema import RepoConfig, WizConfig
+from wiz.coordination.distributed_lock import DistributedLockManager
 from wiz.coordination.file_lock import FileLockManager
 from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.github_prs import GitHubPRs
@@ -63,6 +64,16 @@ class DevCyclePipeline:
             strikes, self.config.agents.reviewer.max_review_cycles
         )
 
+        # Distributed locking (multi-machine) — only when machine_id is configured
+        distributed_locks: DistributedLockManager | None = None
+        if self.config.global_.machine_id:
+            distributed_locks = DistributedLockManager(
+                github, self.config.global_.machine_id
+            )
+            cleaned = distributed_locks.cleanup_stale()
+            if cleaned:
+                logger.info("Cleaned up %d stale distributed claims", cleaned)
+
         for phase in phases:
             remaining = self._time_remaining(start_time, cycle_timeout)
             if remaining <= 0:
@@ -79,10 +90,14 @@ class DevCyclePipeline:
                 if phase == "bug_hunt":
                     result = self._run_bug_hunt(repo, github, remaining)
                 elif phase == "bug_fix":
-                    result = self._run_bug_fix(repo, github, worktree, locks, remaining)
+                    result = self._run_bug_fix(
+                        repo, github, worktree, locks, remaining,
+                        distributed_locks=distributed_locks,
+                    )
                 elif phase == "review":
                     result = self._run_review(
-                        repo, github, prs, loop_tracker, remaining
+                        repo, github, prs, loop_tracker, remaining,
+                        distributed_locks=distributed_locks,
                     )
                 else:
                     logger.warning("Unknown phase: %s", phase)
@@ -128,10 +143,12 @@ class DevCyclePipeline:
         worktree: WorktreeManager,
         locks: FileLockManager,
         timeout: float,
+        distributed_locks: DistributedLockManager | None = None,
     ) -> dict[str, Any]:
         runner = self._create_runner()
         agent = BugFixerAgent(
-            runner, self.config.agents.bug_fixer, github, worktree, locks
+            runner, self.config.agents.bug_fixer, github, worktree, locks,
+            distributed_locks=distributed_locks,
         )
         return agent.run(
             repo.path,
@@ -145,6 +162,7 @@ class DevCyclePipeline:
         prs: GitHubPRs,
         loop_tracker: LoopTracker,
         timeout: float,
+        distributed_locks: DistributedLockManager | None = None,
     ) -> dict[str, Any]:
         runner = self._create_runner()
         agent = ReviewerAgent(
@@ -155,6 +173,7 @@ class DevCyclePipeline:
             loop_tracker,
             self.notifier,
             repo_name=repo.name,
+            distributed_locks=distributed_locks,
         )
         return agent.run(
             repo.path,

@@ -8,6 +8,7 @@ global:
   bridge_data_dir: "~/.cin-interface"
   log_level: "info"
   timezone: "America/New_York"
+  # machine_id: "macbook-1"  # Uncomment to enable distributed locking across machines
 
 # --- Repositories ---
 repos:

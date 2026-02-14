@@ -85,6 +85,28 @@ class TestGitHubIssues:
         assert self.gh.check_duplicate("new bug") is False
 
     @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_get_issue_success(self, mock_run):
+        issue_data = {"number": 42, "title": "Bug", "labels": [], "state": "OPEN"}
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps(issue_data), returncode=0
+        )
+        result = self.gh.get_issue(42)
+        assert result is not None
+        assert result["number"] == 42
+        cmd = mock_run.call_args[0][0]
+        assert "view" in cmd
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_get_issue_not_found(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+        assert self.gh.get_issue(999) is None
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_get_issue_timeout(self, mock_run):
+        mock_run.side_effect = subprocess.TimeoutExpired("gh", 30)
+        assert self.gh.get_issue(1) is None
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
     def test_timeout_handling(self, mock_run):
         mock_run.side_effect = subprocess.TimeoutExpired("gh", 30)
         assert self.gh.create_issue("title", "body") is None

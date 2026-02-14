@@ -10,6 +10,7 @@ class GlobalConfig(BaseModel):
     bridge_data_dir: str = "~/.coding-agent-bridge"
     log_level: str = "info"
     timezone: str = "America/New_York"
+    machine_id: str | None = None  # enables distributed locking when set
 
 
 class RepoConfig(BaseModel):

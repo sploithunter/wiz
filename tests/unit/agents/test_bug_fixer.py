@@ -7,6 +7,7 @@ from wiz.agents.bug_fixer import BugFixerAgent, _extract_priority
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import BugFixerConfig
+from wiz.coordination.distributed_lock import DistributedLockManager
 from wiz.coordination.file_lock import FileLockManager
 from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.worktree import WorktreeManager
@@ -99,3 +100,57 @@ class TestBugFixerAgent:
         issues = [{"number": 1, "title": "[P2] Bug"}]
         agent.run("/tmp", issues=issues)
         locks.release.assert_called_once_with("issue-1", "bug-fixer")
+
+    def test_distributed_lock_skipped_when_none(self):
+        """No distributed_locks param means no distributed locking."""
+        agent, runner, github, wt, locks = self._make_agent()
+        assert agent.distributed_locks is None
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        issues = [{"number": 1, "title": "[P2] Bug"}]
+        agent.run("/tmp", issues=issues)
+        runner.run.assert_called_once()
+
+    def test_distributed_lock_prefilter(self):
+        """Issues already claimed by another machine are filtered out."""
+        agent, runner, github, wt, locks = self._make_agent()
+        dlocks = MagicMock(spec=DistributedLockManager)
+        agent.distributed_locks = dlocks
+        dlocks.is_claimed.side_effect = lambda i: i.get("number") == 2
+        dlocks.acquire.return_value = True
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+
+        issues = [
+            {"number": 1, "title": "[P2] Bug 1", "labels": []},
+            {"number": 2, "title": "[P2] Bug 2", "labels": [{"name": "wiz-claimed-by-other"}]},
+        ]
+        result = agent.run("/tmp", issues=issues)
+        # Only issue 1 should be processed
+        assert result["issues_processed"] == 1
+        dlocks.acquire.assert_called_once_with(1)
+
+    def test_distributed_lock_released_on_success(self):
+        agent, runner, github, wt, locks = self._make_agent()
+        dlocks = MagicMock(spec=DistributedLockManager)
+        agent.distributed_locks = dlocks
+        dlocks.is_claimed.return_value = False
+        dlocks.acquire.return_value = True
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+
+        issues = [{"number": 5, "title": "[P2] Bug"}]
+        agent.run("/tmp", issues=issues)
+        dlocks.release.assert_called_once_with(5)
+
+    def test_distributed_lock_released_on_failure(self):
+        agent, runner, github, wt, locks = self._make_agent()
+        dlocks = MagicMock(spec=DistributedLockManager)
+        agent.distributed_locks = dlocks
+        dlocks.is_claimed.return_value = False
+        dlocks.acquire.return_value = True
+        runner.run.side_effect = RuntimeError("boom")
+
+        issues = [{"number": 5, "title": "[P2] Bug"}]
+        try:
+            agent.run("/tmp", issues=issues)
+        except RuntimeError:
+            pass
+        dlocks.release.assert_called_once_with(5)

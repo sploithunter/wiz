@@ -7,6 +7,7 @@ from wiz.agents.reviewer import ReviewerAgent
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import ReviewerConfig
+from wiz.coordination.distributed_lock import DistributedLockManager
 from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.github_prs import GitHubPRs
 from wiz.coordination.loop_tracker import LoopTracker
@@ -120,3 +121,31 @@ class TestReviewerAgent:
         ]
         result = agent.run("/tmp", issues=issues)
         assert result["reviews"] == 2
+
+    def test_distributed_lock_skipped_when_none(self, tmp_path: Path):
+        """No distributed_locks means no distributed locking."""
+        agent, runner, github, prs, notifier = self._make_agent(tmp_path)
+        assert agent.distributed_locks is None
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"type": "stop", "response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "url"
+        issues = [{"number": 1, "title": "Bug", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+        assert result["results"][0]["action"] == "approved"
+
+    def test_distributed_lock_released_after_review(self, tmp_path: Path):
+        agent, runner, github, prs, notifier = self._make_agent(tmp_path)
+        dlocks = MagicMock(spec=DistributedLockManager)
+        agent.distributed_locks = dlocks
+        dlocks.is_claimed.return_value = False
+        dlocks.acquire.return_value = True
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"type": "stop", "response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "url"
+        issues = [{"number": 7, "title": "Bug", "body": "x"}]
+        agent.run("/tmp", issues=issues)
+        dlocks.release.assert_called_once_with(7)

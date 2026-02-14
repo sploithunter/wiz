@@ -80,6 +80,17 @@ class GitHubIssues:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
             return []
 
+    def get_issue(self, issue_number: int) -> dict[str, Any] | None:
+        """Get a single issue by number. Returns dict or None."""
+        try:
+            result = self._run_gh(
+                ["issue", "view", str(issue_number), "--json",
+                 "number,title,labels,state,url,body"]
+            )
+            return json.loads(result.stdout) if result.stdout.strip() else None
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+            return None
+
     def add_comment(self, issue_number: int, body: str) -> bool:
         """Add a comment to an issue."""
         args = ["issue", "comment", str(issue_number), "--body", body]

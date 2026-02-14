@@ -10,6 +10,7 @@ from wiz.agents.base import BaseAgent
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import ReviewerConfig
+from wiz.coordination.distributed_lock import DistributedLockManager
 from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.github_prs import GitHubPRs
 from wiz.coordination.loop_tracker import LoopTracker
@@ -33,6 +34,7 @@ class ReviewerAgent(BaseAgent):
         loop_tracker: LoopTracker,
         notifier: TelegramNotifier,
         repo_name: str = "",
+        distributed_locks: DistributedLockManager | None = None,
     ) -> None:
         super().__init__(runner, config)
         self.reviewer_config = config
@@ -41,6 +43,7 @@ class ReviewerAgent(BaseAgent):
         self.loop_tracker = loop_tracker
         self.notifier = notifier
         self.repo_name = repo_name
+        self.distributed_locks = distributed_locks
 
     def build_prompt(self, **kwargs: Any) -> str:
         """Build review prompt for a specific issue."""
@@ -87,6 +90,12 @@ If the fix is inadequate:
         if not issues:
             issues = self.github.list_issues(labels=["needs-review"])
 
+        # Pre-filter issues already claimed by another machine
+        if self.distributed_locks:
+            issues = [
+                i for i in issues if not self.distributed_locks.is_claimed(i)
+            ]
+
         issues = issues[: self.reviewer_config.max_reviews_per_run]
         results: list[dict[str, Any]] = []
 
@@ -100,47 +109,57 @@ If the fix is inadequate:
                 results.append({"issue": number, "action": "escalated"})
                 continue
 
-            # Run review session
-            prompt = self.build_prompt(issue=issue, branch=branch)
-            result = self.runner.run(
-                name=f"wiz-reviewer-{number}",
-                cwd=cwd,
-                prompt=prompt,
-                agent=self.agent_type,
-                timeout=timeout,
-                flags=self.reviewer_config.flags or None,
-            )
-
-            if not result.success:
-                results.append({"issue": number, "action": "error", "reason": result.reason})
+            # Try distributed lock
+            if self.distributed_locks and not self.distributed_locks.acquire(number):
+                logger.info("Issue #%d claimed by another machine, skipping review", number)
+                results.append({"issue": number, "action": "skipped", "reason": "distributed-locked"})
                 continue
 
-            # Check events/output for APPROVED/REJECTED
-            # In practice, we'd parse the agent's output. For now, simulate based on success.
-            approved = self._check_approval(result)
-
-            if approved:
-                # Create PR
-                pr_url = self.prs.create_pr(
-                    title=f"fix: {issue.get('title', 'Bug fix')}",
-                    body=f"Fixes #{number}\n\nReviewed and approved by Wiz Reviewer.",
-                    head=branch,
-                )
-                self.github.close_issue(number)
-                results.append({"issue": number, "action": "approved", "pr": pr_url})
-            else:
-                # Reject: send back with feedback
-                cycle = self.loop_tracker.record_cycle(number, "Review rejected")
-                self.github.add_comment(number, "Review rejected: fix needs improvement")
-                self.github.update_labels(
-                    number, add=["needs-fix"], remove=["needs-review"]
+            try:
+                # Run review session
+                prompt = self.build_prompt(issue=issue, branch=branch)
+                result = self.runner.run(
+                    name=f"wiz-reviewer-{number}",
+                    cwd=cwd,
+                    prompt=prompt,
+                    agent=self.agent_type,
+                    timeout=timeout,
+                    flags=self.reviewer_config.flags or None,
                 )
 
-                if self.loop_tracker.is_max_reached(number):
-                    self._escalate(number, issue.get("title", ""))
-                    results.append({"issue": number, "action": "escalated", "cycle": cycle})
+                if not result.success:
+                    results.append({"issue": number, "action": "error", "reason": result.reason})
+                    continue
+
+                # Check events/output for APPROVED/REJECTED
+                approved = self._check_approval(result)
+
+                if approved:
+                    # Create PR
+                    pr_url = self.prs.create_pr(
+                        title=f"fix: {issue.get('title', 'Bug fix')}",
+                        body=f"Fixes #{number}\n\nReviewed and approved by Wiz Reviewer.",
+                        head=branch,
+                    )
+                    self.github.close_issue(number)
+                    results.append({"issue": number, "action": "approved", "pr": pr_url})
                 else:
-                    results.append({"issue": number, "action": "rejected", "cycle": cycle})
+                    # Reject: send back with feedback
+                    cycle = self.loop_tracker.record_cycle(number, "Review rejected")
+                    self.github.add_comment(number, "Review rejected: fix needs improvement")
+                    self.github.update_labels(
+                        number, add=["needs-fix"], remove=["needs-review"]
+                    )
+
+                    if self.loop_tracker.is_max_reached(number):
+                        self._escalate(number, issue.get("title", ""))
+                        results.append({"issue": number, "action": "escalated", "cycle": cycle})
+                    else:
+                        results.append({"issue": number, "action": "rejected", "cycle": cycle})
+
+            finally:
+                if self.distributed_locks:
+                    self.distributed_locks.release(number)
 
         return {"reviews": len(results), "results": results}
 
