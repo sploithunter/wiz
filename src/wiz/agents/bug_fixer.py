@@ -12,7 +12,7 @@ from wiz.bridge.types import SessionResult
 from wiz.config.schema import BugFixerConfig
 from wiz.coordination.file_lock import FileLockManager
 from wiz.coordination.github_issues import GitHubIssues
-from wiz.coordination.stagnation import StagnationDetector
+from wiz.coordination.strikes import StrikeTracker
 from wiz.coordination.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
@@ -43,12 +43,14 @@ class BugFixerAgent(BaseAgent):
         github: GitHubIssues,
         worktree: WorktreeManager,
         locks: FileLockManager,
+        strikes: StrikeTracker | None = None,
     ) -> None:
         super().__init__(runner, config)
         self.fixer_config = config
         self.github = github
         self.worktree = worktree
         self.locks = locks
+        self.strikes = strikes
 
     def build_prompt(self, **kwargs: Any) -> str:
         """Build fix prompt for a specific issue."""
@@ -112,7 +114,14 @@ class BugFixerAgent(BaseAgent):
 
         for issue in issues:
             number = issue.get("number", 0)
-            stagnation = StagnationDetector(limit=self.fixer_config.stagnation_limit)
+
+            # Check persistent stagnation before attempting fix
+            if self.strikes and self.strikes.is_escalated(
+                number, max_strikes=self.fixer_config.stagnation_limit
+            ):
+                logger.info("Issue #%d already stalled, skipping", number)
+                results.append({"issue": number, "skipped": True, "reason": "stalled"})
+                continue
 
             # Try to acquire locks if available
             lock_key = f"issue-{number}"
@@ -139,23 +148,29 @@ class BugFixerAgent(BaseAgent):
                 )
 
                 if result.success:
-                    if stagnation.check(files_changed=result.success):
-                        self.github.add_comment(
-                            number, "Fix stalled: no progress after multiple attempts"
-                        )
-                        self.github.update_labels(
-                            number, add=["fix-stalled"], remove=["needs-fix"]
-                        )
-                        results.append({"issue": number, "stalled": True})
-                    else:
-                        if self.worktree:
-                            self.worktree.push("fix", number)
-                        self.github.add_comment(number, "Fix applied, ready for review")
-                        self.github.update_labels(
-                            number, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
-                        )
-                        results.append({"issue": number, "fixed": True})
+                    if self.worktree:
+                        self.worktree.push("fix", number)
+                    self.github.add_comment(number, "Fix applied, ready for review")
+                    self.github.update_labels(
+                        number, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
+                    )
+                    results.append({"issue": number, "fixed": True})
                 else:
+                    # Record failed attempt as a strike
+                    if self.strikes:
+                        strike_count = self.strikes.record_issue_strike(
+                            number, result.reason or "failed"
+                        )
+                        if strike_count >= self.fixer_config.stagnation_limit:
+                            self.github.add_comment(
+                                number,
+                                "Fix stalled: no progress after multiple attempts",
+                            )
+                            self.github.update_labels(
+                                number, add=["fix-stalled"], remove=["needs-fix"]
+                            )
+                            results.append({"issue": number, "stalled": True})
+                            continue
                     results.append({"issue": number, "failed": True, "reason": result.reason})
 
             finally:

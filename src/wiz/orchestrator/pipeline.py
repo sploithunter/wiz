@@ -79,7 +79,7 @@ class DevCyclePipeline:
                 if phase == "bug_hunt":
                     result = self._run_bug_hunt(repo, github, remaining)
                 elif phase == "bug_fix":
-                    result = self._run_bug_fix(repo, github, worktree, locks, remaining)
+                    result = self._run_bug_fix(repo, github, worktree, locks, strikes, remaining)
                 elif phase == "review":
                     result = self._run_review(
                         repo, github, prs, loop_tracker, remaining
@@ -127,11 +127,12 @@ class DevCyclePipeline:
         github: GitHubIssues,
         worktree: WorktreeManager,
         locks: FileLockManager,
+        strikes: StrikeTracker,
         timeout: float,
     ) -> dict[str, Any]:
         runner = self._create_runner()
         agent = BugFixerAgent(
-            runner, self.config.agents.bug_fixer, github, worktree, locks
+            runner, self.config.agents.bug_fixer, github, worktree, locks, strikes
         )
         return agent.run(
             repo.path,
