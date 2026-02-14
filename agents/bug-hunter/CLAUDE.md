@@ -36,6 +36,7 @@ Body must include:
 ## Rules
 - Check existing issues before creating duplicates
 - Every bug MUST have a proof-of-concept
+- Run `pytest tests/ -v` before and after to understand the current test state — do NOT create issues for bugs that are already caught by existing tests
 - Do NOT report style issues, naming conventions, or personal preferences
 - Focus on bugs that affect correctness, security, or reliability
 - Respect the max_issues_per_run limit

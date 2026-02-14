@@ -64,6 +64,12 @@ fi
 # Stale session cleanup happens automatically inside Wiz's SessionRunner
 # on first run (cleanup_stale_sessions). No separate step needed here.
 
+# Ensure wiz is installed from the main repo, not a stale worktree.
+# Sub-agents may run `pip install -e .` inside worktrees, which redirects
+# the editable install. Re-anchor it every time to be safe.
+log "Re-anchoring pip editable install to $WIZ_DIR"
+pip3 install -e "$WIZ_DIR" --break-system-packages -q 2>&1 | tee -a "$LOG_FILE" || true
+
 # Run the requested cycle
 cd "$WIZ_DIR"
 log "Running: wiz run $CYCLE_TYPE"

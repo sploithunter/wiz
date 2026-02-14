@@ -34,9 +34,13 @@ ruff check src/
 
 ## Testing
 - All changes must include tests
-- Run `pytest tests/` before committing
+- Run `pytest tests/` before committing — **never commit with failing tests**
 - Integration tests are marked `@pytest.mark.integration`
 - E2E tests are marked `@pytest.mark.e2e`
+
+## Worktree Safety
+- Sub-agents run inside `.worktrees/<type>-<issue>/` and may run `pip install -e .`, which redirects the system-wide editable install to the worktree. This is expected — `scripts/wake.sh` re-anchors the install to the main repo on every launch.
+- Do not modify files outside your worktree's scope.
 
 ## Configuration
 All settings in `config/wiz.yaml`. See `src/wiz/config/schema.py` for all options.

@@ -81,10 +81,27 @@ def run_content_cycle(ctx: click.Context) -> None:
 
 
 @run.command("feature-cycle")
+@click.option("--repo", default=None, help="Run only for specific repo")
 @click.pass_context
-def run_feature_cycle(ctx: click.Context) -> None:
-    """Run the feature cycle."""
-    click.echo("Feature cycle: use 'wiz run dev-cycle --phase feature' for now.")
+def run_feature_cycle(ctx: click.Context, repo: str | None) -> None:
+    """Run the feature cycle (propose or implement features)."""
+    from wiz.config.loader import load_config
+    from wiz.orchestrator.feature_pipeline import FeatureCyclePipeline
+
+    config = load_config(ctx.obj["config_path"])
+    pipeline = FeatureCyclePipeline(config)
+
+    if repo:
+        repo_config = next((r for r in config.repos if r.name == repo), None)
+        if not repo_config:
+            click.echo(f"Repository '{repo}' not found in config")
+            return
+        states = [pipeline.run_repo(repo_config)]
+    else:
+        states = pipeline.run_all()
+
+    for state in states:
+        click.echo(state.summary())
 
 
 @main.command()
