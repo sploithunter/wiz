@@ -37,6 +37,7 @@ def setup_logging(
     """
     root = logging.getLogger("wiz")
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
+    root.handlers.clear()
 
     handler = logging.StreamHandler(sys.stderr)
 

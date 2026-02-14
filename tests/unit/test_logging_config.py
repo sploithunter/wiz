@@ -62,3 +62,13 @@ class TestSetupLogging:
         )
         # Cleanup
         logger.handlers.clear()
+
+    def test_no_duplicate_handlers(self):
+        logger = logging.getLogger("wiz")
+        logger.handlers.clear()
+        setup_logging(level="INFO")
+        setup_logging(level="INFO")
+        setup_logging(level="INFO")
+        assert len(logger.handlers) == 1
+        # Cleanup
+        logger.handlers.clear()
