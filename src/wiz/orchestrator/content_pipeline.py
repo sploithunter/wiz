@@ -37,20 +37,28 @@ class ContentCyclePipeline:
 
         # Blog Writer
         try:
+            logger.info("=== content: blog_write ===")
+            phase_start = time.time()
             runner = self._create_runner()
             blog = BlogWriterAgent(runner, self.config.agents.blog_writer, memory)
             result = blog.run(".", timeout=self.config.agents.blog_writer.session_timeout)
+            logger.info("=== content: blog_write completed (%.1fs) ===", time.time() - phase_start)
             state.add_phase("blog_write", result.get("success", False), result)
         except Exception as e:
+            logger.error("Phase blog_write failed: %s", e, exc_info=True)
             state.add_phase("blog_write", False, {"error": str(e)})
 
         # Social Manager
         try:
+            logger.info("=== content: social_manage ===")
+            phase_start = time.time()
             runner = self._create_runner()
             social = SocialManagerAgent(runner, self.config.agents.social_manager, memory)
             result = social.run(".", timeout=self.config.agents.social_manager.session_timeout)
+            logger.info("=== content: social_manage completed (%.1fs) ===", time.time() - phase_start)
             state.add_phase("social_manage", result.get("success", False), result)
         except Exception as e:
+            logger.error("Phase social_manage failed: %s", e, exc_info=True)
             state.add_phase("social_manage", False, {"error": str(e)})
 
         state.total_elapsed = time.time() - start

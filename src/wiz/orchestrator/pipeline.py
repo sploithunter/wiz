@@ -93,7 +93,7 @@ class DevCyclePipeline:
 
             except Exception as e:
                 phase_elapsed = time.time() - phase_start
-                logger.error("Phase %s failed: %s", phase, e)
+                logger.error("Phase %s failed: %s", phase, e, exc_info=True)
                 state.add_phase(phase, False, {"error": str(e)}, phase_elapsed)
 
         state.total_elapsed = time.time() - start_time

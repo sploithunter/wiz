@@ -112,6 +112,8 @@ class BugFixerAgent(BaseAgent):
 
         for issue in issues:
             number = issue.get("number", 0)
+            title = issue.get("title", "")
+            logger.info("Fixing issue #%d: %s", number, title)
             stagnation = StagnationDetector(limit=self.fixer_config.stagnation_limit)
 
             # Try to acquire locks if available
@@ -141,6 +143,7 @@ class BugFixerAgent(BaseAgent):
 
                 if result.success:
                     if stagnation.check(files_changed=result.success):
+                        logger.warning("Issue #%d: stagnation detected", number)
                         self.github.add_comment(
                             number, "Fix stalled: no progress after multiple attempts"
                         )
@@ -151,12 +154,14 @@ class BugFixerAgent(BaseAgent):
                     else:
                         if self.worktree:
                             self.worktree.push("fix", number)
+                        logger.info("Issue #%d: fix applied, pushed to fix/%d", number, number)
                         self.github.add_comment(number, "Fix applied, ready for review")
                         self.github.update_labels(
                             number, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
                         )
                         results.append({"issue": number, "fixed": True})
                 else:
+                    logger.warning("Issue #%d: fix failed: %s", number, result.reason)
                     results.append({"issue": number, "failed": True, "reason": result.reason})
 
             finally:

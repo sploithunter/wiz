@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from pathlib import Path
 
 import click
 
 from wiz import __version__
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = Path(__file__).parent.parent.parent / "config" / "wiz.yaml"
 
@@ -58,9 +62,19 @@ def run_dev_cycle(ctx: click.Context, repo: str | None, phase: str | None) -> No
         if not repo_config:
             click.echo(f"Repository '{repo}' not found in config")
             return
+        repo_names = [repo_config.name]
+    else:
+        repo_names = [r.name for r in config.repos if r.enabled]
+
+    logger.info("========== Dev cycle starting [repos: %s] ==========", ", ".join(repo_names))
+    cycle_start = time.time()
+
+    if repo:
         states = [pipeline.run_repo(repo_config, phases)]
     else:
         states = pipeline.run_all()
+
+    logger.info("========== Dev cycle completed (%.1fs) ==========", time.time() - cycle_start)
 
     reporter = StatusReporter(notifier)
     summary = reporter.report(states)
@@ -76,7 +90,13 @@ def run_content_cycle(ctx: click.Context) -> None:
 
     config = load_config(ctx.obj["config_path"])
     pipeline = ContentCyclePipeline(config)
+
+    logger.info("========== Content cycle starting ==========")
+    cycle_start = time.time()
+
     state = pipeline.run()
+
+    logger.info("========== Content cycle completed (%.1fs) ==========", time.time() - cycle_start)
     click.echo(state.summary())
 
 
@@ -96,9 +116,19 @@ def run_feature_cycle(ctx: click.Context, repo: str | None) -> None:
         if not repo_config:
             click.echo(f"Repository '{repo}' not found in config")
             return
+        repo_names = [repo_config.name]
+    else:
+        repo_names = [r.name for r in config.repos if r.enabled]
+
+    logger.info("========== Feature cycle starting [repos: %s] ==========", ", ".join(repo_names))
+    cycle_start = time.time()
+
+    if repo:
         states = [pipeline.run_repo(repo_config)]
     else:
         states = pipeline.run_all()
+
+    logger.info("========== Feature cycle completed (%.1fs) ==========", time.time() - cycle_start)
 
     for state in states:
         click.echo(state.summary())

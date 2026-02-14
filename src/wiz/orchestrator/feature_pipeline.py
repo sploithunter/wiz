@@ -39,6 +39,7 @@ class FeatureCyclePipeline:
             Path(repo.path), self.config.worktrees.base_dir,
         )
 
+        logger.info("=== %s: feature_cycle ===", repo.name)
         try:
             runner = self._create_runner()
             agent = FeatureProposerAgent(
@@ -52,6 +53,11 @@ class FeatureCyclePipeline:
             success = result.get("success", False)
             skipped = result.get("skipped", False)
 
+            logger.info(
+                "Feature cycle %s: mode=%s success=%s skipped=%s",
+                repo.name, mode, success, skipped,
+            )
+
             if skipped:
                 state.add_phase(
                     f"feature_{mode}", True, result, time.time() - start,
@@ -61,7 +67,7 @@ class FeatureCyclePipeline:
                     f"feature_{mode}", success, result, time.time() - start,
                 )
         except Exception as e:
-            logger.error("Feature cycle failed for %s: %s", repo.name, e)
+            logger.error("Feature cycle failed for %s: %s", repo.name, e, exc_info=True)
             state.add_phase("feature", False, {"error": str(e)}, time.time() - start)
 
         state.total_elapsed = time.time() - start
