@@ -1,10 +1,15 @@
 """Tests for session runner."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 from wiz.bridge.client import BridgeClient
 from wiz.bridge.monitor import BridgeEventMonitor
-from wiz.bridge.runner import SessionRunner
+from wiz.bridge.runner import SessionRunner, ensure_hooks
+
+
+# All bridge session tests need ensure_hooks mocked to avoid touching real settings
+_MOCK_HOOKS = patch("wiz.bridge.runner.ensure_hooks", return_value=True)
 
 
 class TestSessionRunner:
@@ -16,7 +21,8 @@ class TestSessionRunner:
             cleanup_on_start=cleanup_on_start,
         )
 
-    def test_full_lifecycle_success(self):
+    @_MOCK_HOOKS
+    def test_full_lifecycle_success(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -60,7 +66,8 @@ class TestSessionRunner:
         assert result.success is False
         assert result.reason == "bridge_unavailable"
 
-    def test_session_creation_failure(self):
+    @_MOCK_HOOKS
+    def test_session_creation_failure(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = None
@@ -71,7 +78,8 @@ class TestSessionRunner:
         assert result.success is False
         assert result.reason == "failed_to_create_session"
 
-    def test_prompt_send_failure(self):
+    @_MOCK_HOOKS
+    def test_prompt_send_failure(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -85,7 +93,8 @@ class TestSessionRunner:
         # Should still cleanup
         client.delete_session.assert_called_once_with("sess-1")
 
-    def test_timeout_path(self):
+    @_MOCK_HOOKS
+    def test_timeout_path(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -107,7 +116,8 @@ class TestSessionRunner:
         assert result.reason == "timeout"
         client.delete_session.assert_called_once()
 
-    def test_stop_event_path(self):
+    @_MOCK_HOOKS
+    def test_stop_event_path(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -127,7 +137,8 @@ class TestSessionRunner:
         assert result.success is True
         assert result.reason == "completed"
 
-    def test_offline_detection(self):
+    @_MOCK_HOOKS
+    def test_offline_detection(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -148,7 +159,8 @@ class TestSessionRunner:
         assert result.success is True
         assert result.reason == "completed"
 
-    def test_cleanup_on_exception(self):
+    @_MOCK_HOOKS
+    def test_cleanup_on_exception(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -162,7 +174,8 @@ class TestSessionRunner:
             pass
         client.delete_session.assert_called_once_with("sess-1")
 
-    def test_startup_cleanup_runs_once(self):
+    @_MOCK_HOOKS
+    def test_startup_cleanup_runs_once(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -185,7 +198,8 @@ class TestSessionRunner:
         # cleanup_all_sessions called once (first run only)
         client.cleanup_all_sessions.assert_called_once()
 
-    def test_startup_cleanup_disabled(self):
+    @_MOCK_HOOKS
+    def test_startup_cleanup_disabled(self, _mock_hooks):
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
@@ -266,3 +280,71 @@ class TestSessionRunner:
         # Bridge should NOT be called for codex
         client.create_session.assert_not_called()
         client.send_prompt.assert_not_called()
+
+
+class TestEnsureHooks:
+    def test_installs_hooks_in_global_and_project(self, tmp_path):
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        hook_script = tmp_path / "hook.sh"
+        hook_script.write_text("#!/bin/bash\n")
+
+        with patch("wiz.bridge.runner._HOOK_SCRIPT", str(hook_script)), \
+             patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
+            result = ensure_hooks(cwd=str(project_dir))
+
+        assert result is True
+        # Global settings
+        global_data = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+        assert "Stop" in global_data["hooks"]
+        # Project-level settings
+        project_data = json.loads((project_dir / ".claude" / "settings.local.json").read_text())
+        assert "Stop" in project_data["hooks"]
+
+    def test_preserves_existing_settings(self, tmp_path):
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings = settings_dir / "settings.json"
+        settings.write_text(json.dumps({"model": "opus", "env": {"FOO": "bar"}}))
+
+        hook_script = tmp_path / "hook.sh"
+        hook_script.write_text("#!/bin/bash\n")
+
+        with patch("wiz.bridge.runner._HOOK_SCRIPT", str(hook_script)), \
+             patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
+            result = ensure_hooks()
+
+        assert result is True
+        data = json.loads(settings.read_text())
+        assert data["model"] == "opus"
+        assert data["env"]["FOO"] == "bar"
+        assert "hooks" in data
+
+    def test_idempotent_when_hooks_present(self, tmp_path):
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings = settings_dir / "settings.json"
+
+        hook_script = tmp_path / "hook.sh"
+        hook_script.write_text("#!/bin/bash\n")
+
+        # Pre-populate with hooks
+        initial = {"hooks": {"Stop": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": str(hook_script), "timeout": 5}
+        ]}]}}
+        settings.write_text(json.dumps(initial))
+
+        with patch("wiz.bridge.runner._HOOK_SCRIPT", str(hook_script)), \
+             patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
+            result = ensure_hooks()
+
+        assert result is True
+        data = json.loads(settings.read_text())
+        # Stop should still have exactly 1 entry (not duplicated)
+        assert len(data["hooks"]["Stop"]) == 1
+
+    def test_returns_false_if_hook_script_missing(self, tmp_path):
+        with patch("wiz.bridge.runner._HOOK_SCRIPT", str(tmp_path / "nonexistent.sh")), \
+             patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
+            result = ensure_hooks()
+        assert result is False

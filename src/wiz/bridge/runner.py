@@ -5,6 +5,7 @@ Pattern adapted from harness-bench cab_bridge.py:228-325.
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
@@ -19,6 +20,78 @@ from wiz.bridge.monitor import BridgeEventMonitor
 from wiz.bridge.types import SessionResult
 
 logger = logging.getLogger(__name__)
+
+# Hook script that bridges Claude Code events to the bridge's event pipeline
+_HOOK_SCRIPT = str(Path.home() / ".cin-interface" / "hooks" / "coding-agent-hook.sh")
+
+# Required hook event types for bridge event correlation
+_REQUIRED_HOOKS = ("Stop", "PreToolUse", "PostToolUse", "Notification", "SubagentStop")
+
+_HOOK_ENTRY = {
+    "matcher": "*",
+    "hooks": [{"type": "command", "command": _HOOK_SCRIPT, "timeout": 5}],
+}
+
+
+def ensure_hooks(cwd: str | None = None) -> bool:
+    """Ensure Claude Code hooks are configured for the target CWD.
+
+    Writes hooks to a project-level .claude/settings.local.json in the
+    target CWD. This file takes precedence over ~/.claude/settings.json
+    and won't be clobbered by other Claude Code sessions modifying the
+    global settings.
+    """
+    if not Path(_HOOK_SCRIPT).exists():
+        logger.warning("Hook script not found: %s", _HOOK_SCRIPT)
+        return False
+
+    targets: list[Path] = []
+
+    # Always ensure global settings have hooks
+    targets.append(Path.home() / ".claude" / "settings.json")
+
+    # Also write to project-level settings if CWD provided
+    if cwd:
+        targets.append(Path(cwd) / ".claude" / "settings.local.json")
+
+    try:
+        for settings_path in targets:
+            if settings_path.exists():
+                data = json.loads(settings_path.read_text())
+            else:
+                data = {}
+
+            hooks = data.get("hooks", {})
+            changed = False
+
+            for event_type in _REQUIRED_HOOKS:
+                if event_type not in hooks:
+                    hooks[event_type] = [_HOOK_ENTRY]
+                    changed = True
+                else:
+                    # Check if our hook script is already in the list
+                    existing_cmds = [
+                        h.get("hooks", [{}])[0].get("command", "")
+                        for h in hooks[event_type]
+                        if h.get("hooks")
+                    ]
+                    if _HOOK_SCRIPT not in existing_cmds:
+                        hooks[event_type].append(_HOOK_ENTRY)
+                        changed = True
+
+            if changed:
+                data["hooks"] = hooks
+                settings_path.parent.mkdir(parents=True, exist_ok=True)
+                settings_path.write_text(json.dumps(data, indent=2) + "\n")
+                logger.info("Installed hooks in %s", settings_path)
+            else:
+                logger.debug("Hooks already configured in %s", settings_path)
+
+        return True
+
+    except Exception as e:
+        logger.error("Failed to ensure hooks: %s", e)
+        return False
 
 
 class SessionRunner:
@@ -171,6 +244,9 @@ class SessionRunner:
         # Check server health
         if not self.client.health_check():
             return SessionResult(success=False, reason="bridge_unavailable")
+
+        # Ensure hooks are installed before launching Claude Code
+        ensure_hooks(cwd)
 
         # Cleanup stale sessions on first run
         if self._cleanup_on_start:
