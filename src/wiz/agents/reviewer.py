@@ -125,8 +125,19 @@ If the fix is inadequate:
                     body=f"Fixes #{number}\n\nReviewed and approved by Wiz Reviewer.",
                     head=branch,
                 )
-                self.github.close_issue(number)
-                results.append({"issue": number, "action": "approved", "pr": pr_url})
+                if pr_url:
+                    self.github.close_issue(number)
+                    results.append({"issue": number, "action": "approved", "pr": pr_url})
+                else:
+                    logger.error("PR creation failed for issue #%d", number)
+                    self.github.add_comment(
+                        number,
+                        "Review approved but PR creation failed. Sending back for re-fix.",
+                    )
+                    self.github.update_labels(
+                        number, add=["needs-fix"], remove=["needs-review"]
+                    )
+                    results.append({"issue": number, "action": "pr-failed"})
             else:
                 # Reject: send back with feedback
                 cycle = self.loop_tracker.record_cycle(number, "Review rejected")

@@ -106,6 +106,31 @@ class TestReviewerAgent:
         assert result["results"][0]["action"] == "escalated"
         runner.run.assert_not_called()  # No review session needed
 
+    def test_pr_creation_failure_does_not_close_issue(self, tmp_path: Path):
+        """When PR creation fails, issue must NOT be closed (regression #1)."""
+        agent, runner, github, prs, notifier = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"type": "stop", "response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = None  # PR creation failure
+
+        issues = [{"number": 101, "title": "[P2] test", "body": "bug"}]
+        result = agent.run("/tmp", issues=issues)
+
+        # Issue must NOT be closed
+        github.close_issue.assert_not_called()
+        # Should be marked as pr-failed, not approved
+        assert result["results"][0]["action"] == "pr-failed"
+        assert result["results"][0]["issue"] == 101
+        # Should add comment about failure and relabel to needs-fix
+        github.add_comment.assert_called_once()
+        assert "PR creation failed" in github.add_comment.call_args[0][1]
+        github.update_labels.assert_called_once_with(
+            101, add=["needs-fix"], remove=["needs-review"]
+        )
+
     def test_max_reviews_per_run(self, tmp_path: Path):
         config = ReviewerConfig(max_reviews_per_run=2)
         agent, runner, github, prs, notifier = self._make_agent(tmp_path, config)
