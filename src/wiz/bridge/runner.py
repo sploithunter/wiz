@@ -135,6 +135,7 @@ class SessionRunner:
         agent: str = "claude",
         model: str | None = None,
         timeout: float = 600,
+        flags: list[str] | None = None,
     ) -> SessionResult:
         """Run a complete session lifecycle.
 
@@ -144,7 +145,7 @@ class SessionRunner:
         """
         if agent == "codex":
             return self._run_codex_exec(name, cwd, prompt, model, timeout)
-        return self._run_bridge_session(name, cwd, prompt, agent, model, timeout)
+        return self._run_bridge_session(name, cwd, prompt, agent, model, timeout, flags)
 
     def _run_codex_exec(
         self,
@@ -235,6 +236,7 @@ class SessionRunner:
         agent: str = "claude",
         model: str | None = None,
         timeout: float = 0,
+        flags: list[str] | None = None,
     ) -> SessionResult:
         """Run a session via the bridge (REST + WebSocket hooks).
 
@@ -264,7 +266,7 @@ class SessionRunner:
         try:
             # Create session
             logger.info("Creating %s session: %s", agent, name)
-            session_id = self.client.create_session(name, cwd, agent, model)
+            session_id = self.client.create_session(name, cwd, agent, model, flags)
             if not session_id:
                 return SessionResult(success=False, reason="failed_to_create_session")
 

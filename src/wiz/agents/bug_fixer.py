@@ -136,6 +136,7 @@ class BugFixerAgent(BaseAgent):
                     prompt=prompt,
                     agent=self.agent_type,
                     timeout=timeout,
+                    flags=self.fixer_config.flags or None,
                 )
 
                 if result.success:

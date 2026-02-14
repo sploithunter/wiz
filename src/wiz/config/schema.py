@@ -26,6 +26,7 @@ class BugHunterConfig(BaseModel):
     min_severity: str = "P4"
     require_poc: bool = True
     session_timeout: int = 600
+    flags: list[str] = Field(default_factory=list)
 
 
 class BugFixerConfig(BaseModel):
@@ -33,6 +34,7 @@ class BugFixerConfig(BaseModel):
     max_fixes_per_run: int = 5
     stagnation_limit: int = 3
     session_timeout: int = 600
+    flags: list[str] = Field(default_factory=list)
 
 
 class ReviewerConfig(BaseModel):
@@ -40,6 +42,7 @@ class ReviewerConfig(BaseModel):
     max_reviews_per_run: int = 10
     max_review_cycles: int = 3
     session_timeout: int = 300
+    flags: list[str] = Field(default_factory=list)
 
 
 class FeatureProposerConfig(BaseModel):
@@ -48,6 +51,7 @@ class FeatureProposerConfig(BaseModel):
     auto_propose_features: bool = True
     require_approval: bool = True
     session_timeout: int = 900
+    flags: list[str] = Field(default_factory=list)
 
 
 class BlogWriterConfig(BaseModel):
@@ -56,6 +60,7 @@ class BlogWriterConfig(BaseModel):
     require_approval: bool = True
     output_dir: str = "~/Documents/blog-drafts"
     session_timeout: int = 600
+    flags: list[str] = Field(default_factory=list)
 
 
 class SocialManagerConfig(BaseModel):
@@ -64,6 +69,7 @@ class SocialManagerConfig(BaseModel):
     platforms: list[str] = Field(default_factory=lambda: ["x"])
     require_approval: bool = True
     session_timeout: int = 300
+    flags: list[str] = Field(default_factory=list)
 
 
 class AgentsConfig(BaseModel):

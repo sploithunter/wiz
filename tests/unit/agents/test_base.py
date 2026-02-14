@@ -35,6 +35,7 @@ class TestBaseAgent:
             prompt="Test prompt: find bugs",
             agent="claude",
             timeout=60,
+            flags=None,
         )
         assert result["processed"] is True
         assert result["success"] is True

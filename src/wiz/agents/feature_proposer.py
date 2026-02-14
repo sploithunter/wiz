@@ -87,6 +87,7 @@ Commit all changes and ensure all tests pass.
                 prompt=prompt,
                 agent=self.agent_type,
                 timeout=timeout,
+                flags=self.fp_config.flags or None,
             )
 
             if result.success:
@@ -105,6 +106,7 @@ Commit all changes and ensure all tests pass.
                     prompt=prompt,
                     agent=self.agent_type,
                     timeout=timeout,
+                    flags=self.fp_config.flags or None,
                 )
                 return self.process_result(result, mode="propose")
             return {"skipped": True, "reason": "backlog_not_empty"}

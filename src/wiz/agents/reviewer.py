@@ -108,6 +108,7 @@ If the fix is inadequate:
                 prompt=prompt,
                 agent=self.agent_type,
                 timeout=timeout,
+                flags=self.reviewer_config.flags or None,
             )
 
             if not result.success:
