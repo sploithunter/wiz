@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "blog-writer" / "CLAUDE.md"
 
+# Memory keywords for topic lifecycle
+PROPOSED_TOPIC_KEY = "blog-proposed-topic"
+PROPOSED_TOPIC_FILE = "blog-proposed-topic.md"
+
 
 class BlogWriterAgent(BaseAgent):
     agent_type = "claude"
@@ -34,6 +38,51 @@ class BlogWriterAgent(BaseAgent):
         self.blog_config = config
         self.memory = memory
         self.google_docs = google_docs
+
+    def _get_pending_topic(self) -> str | None:
+        """Check memory for a previously proposed topic awaiting writing."""
+        if not self.memory:
+            return None
+        results = self.memory.retrieve([PROPOSED_TOPIC_KEY])
+        for kw, content in results:
+            if kw == PROPOSED_TOPIC_KEY and content.strip():
+                return content.strip()
+        return None
+
+    def _store_proposed_topic(self, result: SessionResult) -> str | None:
+        """Extract topic from propose-mode output and store in memory."""
+        if not self.memory:
+            return None
+
+        # Collect all text from events
+        text_chunks: list[str] = []
+        for event in result.events:
+            data = event.get("data", {})
+            message = data.get("message", "")
+            if message:
+                text_chunks.append(message)
+            text = event.get("text", "")
+            if text:
+                text_chunks.append(text)
+        full_text = "\n".join(text_chunks)
+
+        if not full_text.strip():
+            full_text = result.reason or ""
+
+        if full_text.strip():
+            self.memory.update_topic(
+                PROPOSED_TOPIC_KEY, PROPOSED_TOPIC_FILE, full_text.strip()
+            )
+            self.memory.save_index()
+            logger.info("Stored proposed blog topic in memory")
+            return full_text.strip()
+        return None
+
+    def _consume_pending_topic(self) -> None:
+        """Remove the pending topic from memory after writing."""
+        if self.memory:
+            self.memory.delete_topic(PROPOSED_TOPIC_KEY)
+            self.memory.save_index()
 
     def build_prompt(self, **kwargs: Any) -> str:
         mode = kwargs.get("mode", "propose")
@@ -69,6 +118,54 @@ Topic: {topic}
 Write a complete blog draft. Save to: {output_dir}/
 Use markdown format with frontmatter (title, date, tags).
 """
+
+    def run(self, cwd: str, timeout: float = 600, **kwargs: Any) -> dict[str, Any]:
+        """Run blog writer with automatic mode transition.
+
+        Logic:
+        1. If a pending topic exists in memory → write mode (consume topic)
+        2. Else if auto_propose_topics → propose mode (store topic for next run)
+        3. Otherwise → skip
+        """
+        pending_topic = self._get_pending_topic()
+
+        if pending_topic:
+            # Write mode: draft the pending topic
+            logger.info("Found pending topic, switching to write mode")
+            prompt = self.build_prompt(mode="write", topic=pending_topic)
+            result = self.runner.run(
+                name="wiz-blog-write",
+                cwd=cwd,
+                prompt=prompt,
+                agent=self.agent_type,
+                timeout=timeout,
+                flags=self.blog_config.flags or None,
+            )
+
+            if result.success:
+                self._consume_pending_topic()
+
+            return self.process_result(result, mode="write", topic=pending_topic)
+
+        elif self.blog_config.auto_propose_topics:
+            # Propose mode: generate a topic for next run
+            logger.info("No pending topic, running in propose mode")
+            prompt = self.build_prompt(mode="propose")
+            result = self.runner.run(
+                name="wiz-blog-propose",
+                cwd=cwd,
+                prompt=prompt,
+                agent=self.agent_type,
+                timeout=timeout,
+                flags=self.blog_config.flags or None,
+            )
+
+            if result.success:
+                self._store_proposed_topic(result)
+
+            return self.process_result(result, mode="propose")
+
+        return {"skipped": True, "reason": "no_pending_topics"}
 
     def process_result(self, result: SessionResult, **kwargs: Any) -> dict[str, Any]:
         if not result.success:
