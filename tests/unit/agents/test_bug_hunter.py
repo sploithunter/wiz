@@ -68,3 +68,23 @@ class TestBugHunterAgent:
         assert output["success"] is True
         runner.run.assert_called_once()
         assert runner.run.call_args[1]["agent"] == "codex"
+
+    def test_docs_audit_in_prompt_by_default(self):
+        agent, _, _ = self._make_agent()
+        prompt = agent.build_prompt()
+        assert "Documentation Audit" in prompt
+        assert "[P4] Docs:" in prompt
+        assert "wiz-bug,docs" in prompt
+
+    def test_docs_audit_disabled(self):
+        config = BugHunterConfig(audit_docs=False)
+        agent, _, _ = self._make_agent(config)
+        prompt = agent.build_prompt()
+        assert "Documentation Audit" not in prompt
+
+    def test_docs_audit_mentions_key_checks(self):
+        agent, _, _ = self._make_agent()
+        prompt = agent.build_prompt()
+        assert "README" in prompt
+        assert "docstrings" in prompt
+        assert "schema.py" in prompt

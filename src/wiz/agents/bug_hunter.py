@@ -51,6 +51,25 @@ class BugHunterAgent(BaseAgent):
         max_issues = self.bug_config.max_issues_per_run
         min_severity = self.bug_config.min_severity
 
+        docs_section = ""
+        if self.bug_config.audit_docs:
+            docs_section = """
+
+## Documentation Audit
+Also check for documentation gaps. File these as **P4** issues with labels "wiz-bug" AND "docs":
+gh issue create -R {repo} --title "[P4] Docs: {description}" --body "..." --label "wiz-bug,docs"
+
+Look for:
+- Missing or incomplete README
+- Public modules/classes with no docstrings
+- Config options that exist in schema.py but are not documented
+- Outdated examples or instructions that no longer match the code
+- New features with no corresponding documentation
+
+Only flag significant gaps — not missing docstrings on private helpers.
+These count toward the maximum issues limit above.
+"""
+
         return f"""{instructions}
 
 ## Configuration
@@ -64,7 +83,7 @@ Analyze this repository for bugs. For each bug found, create a GitHub issue usin
 gh issue create -R {{repo}} --title "[P{{severity}}] {{description}}" --body "..." --label "wiz-bug"
 
 Focus on real, impactful bugs. No style issues or nitpicks.
-"""
+{docs_section}"""
 
     def process_result(self, result: SessionResult, **kwargs: Any) -> dict[str, Any]:
         """Check GitHub for newly created bug issues."""

@@ -27,6 +27,7 @@ class BugHunterConfig(BaseModel):
     max_issues_per_run: int = 10
     min_severity: str = "P4"
     require_poc: bool = True
+    audit_docs: bool = True
     session_timeout: int = 600
     flags: list[str] = Field(default_factory=list)
 

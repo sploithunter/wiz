@@ -49,6 +49,7 @@ agents:
     max_issues_per_run: 10
     min_severity: "P4"
     require_poc: true
+    audit_docs: true  # Also flag documentation gaps as P4 issues
     session_timeout: 600
 
   bug_fixer:
