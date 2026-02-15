@@ -161,6 +161,7 @@ class BugFixerAgent(BaseAgent):
                 cwd=work_dir,
                 prompt=prompt,
                 agent=self.agent_type,
+                model=self.fixer_config.model,
                 timeout=timeout,
                 flags=self.fixer_config.flags or None,
             )

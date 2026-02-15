@@ -1,4 +1,7 @@
-"""Tests for feature proposer agent."""
+"""Tests for feature proposer agent.
+
+Includes regression test for issue #53: model config passthrough.
+"""
 
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -229,3 +232,36 @@ class TestTelegramNotifications:
 
         agent.run("/tmp")
         notifier.send_message.assert_not_called()
+
+
+class TestFeatureProposerModelPassthrough:
+    """Regression test for issue #53: model config must reach runner.run."""
+
+    def test_model_passed_in_propose_mode(self):
+        config = FeatureProposerConfig(model="custom-model")
+        runner = MagicMock(spec=SessionRunner)
+        github = MagicMock(spec=GitHubIssues)
+        worktree = MagicMock(spec=WorktreeManager)
+        worktree.create.return_value = Path("/tmp/feature-wt")
+        agent = FeatureProposerAgent(runner, config, github, worktree)
+
+        github.list_issues.side_effect = [[], [], []]
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+
+        agent.run("/tmp")
+        assert runner.run.call_args[1]["model"] == "custom-model"
+
+    def test_model_passed_in_implement_mode(self):
+        config = FeatureProposerConfig(model="custom-model")
+        runner = MagicMock(spec=SessionRunner)
+        github = MagicMock(spec=GitHubIssues)
+        worktree = MagicMock(spec=WorktreeManager)
+        worktree.create.return_value = Path("/tmp/feature-wt")
+        agent = FeatureProposerAgent(runner, config, github, worktree)
+
+        approved_issue = [{"number": 5, "title": "Add caching", "body": "Details"}]
+        github.list_issues.side_effect = [approved_issue]
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+
+        agent.run("/tmp")
+        assert runner.run.call_args[1]["model"] == "custom-model"

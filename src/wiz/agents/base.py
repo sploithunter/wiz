@@ -43,11 +43,13 @@ class BaseAgent(ABC):
         logger.info("Running %s agent in %s", self.agent_name, cwd)
 
         flags = getattr(self.config, "flags", None) or None
+        model = getattr(self.config, "model", None) or None
         result = self.runner.run(
             name=f"wiz-{self.agent_name}",
             cwd=cwd,
             prompt=prompt,
             agent=self.agent_type,
+            model=model,
             timeout=timeout,
             flags=flags,
         )

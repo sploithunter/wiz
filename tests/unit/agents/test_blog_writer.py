@@ -1,4 +1,7 @@
-"""Tests for blog writer agent."""
+"""Tests for blog writer agent.
+
+Includes regression test for issue #53: model config passthrough.
+"""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -474,3 +477,36 @@ class TestBlogWriterActivityContext:
         runner = MagicMock(spec=SessionRunner)
         agent = BlogWriterAgent(runner, BlogWriterConfig())
         assert agent.repos == []
+
+
+class TestBlogWriterModelPassthrough:
+    """Regression test for issue #53: model config must reach runner.run."""
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_model_passed_in_write_mode(self, _mock_img):
+        config = BlogWriterConfig(model="custom-model")
+        runner = MagicMock(spec=SessionRunner)
+        memory = MagicMock(spec=LongTermMemory)
+        memory.retrieve.return_value = [(PROPOSED_TOPIC_KEY, "Test topic")]
+        agent = BlogWriterAgent(runner, config, memory=memory)
+
+        runner.run.return_value = SessionResult(success=True, reason="done")
+        agent.run("/tmp")
+
+        assert runner.run.call_args[1]["model"] == "custom-model"
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_model_passed_in_propose_mode(self, _mock_img):
+        config = BlogWriterConfig(model="custom-model")
+        runner = MagicMock(spec=SessionRunner)
+        memory = MagicMock(spec=LongTermMemory)
+        memory.retrieve.return_value = []
+        agent = BlogWriterAgent(runner, config, memory=memory)
+
+        runner.run.return_value = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"message": "topic idea"}}],
+        )
+        agent.run("/tmp")
+
+        assert runner.run.call_args[1]["model"] == "custom-model"
