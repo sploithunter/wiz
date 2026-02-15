@@ -313,22 +313,34 @@ class TestParallelFixes:
         agent = BugFixerAgent(runner, config, github, worktree, locks, parallel=parallel)
         return agent, runner, github, worktree, locks
 
+    def _mock_isolated_runner(self, agent, **run_kwargs):
+        """Patch _create_isolated_runner to return mock runners per thread."""
+        mock_runner = MagicMock()
+        for k, v in run_kwargs.items():
+            setattr(mock_runner.run, k, v)
+        agent._create_isolated_runner = MagicMock(return_value=mock_runner)
+        return mock_runner
+
     @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
     def test_parallel_processes_all_issues(self, _mock_check):
         agent, runner, github, wt, locks = self._make_agent()
-        runner.run.return_value = SessionResult(success=True, reason="completed")
+        mock_runner = self._mock_isolated_runner(
+            agent, return_value=SessionResult(success=True, reason="completed"),
+        )
         issues = [
             {"number": i, "title": f"[P2] Bug {i}", "body": "x"}
             for i in range(3)
         ]
         result = agent.run("/tmp", issues=issues)
         assert result["issues_processed"] == 3
-        assert runner.run.call_count == 3
+        assert agent._create_isolated_runner.call_count == 3
 
     @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
     def test_parallel_collects_results(self, _mock_check):
         agent, runner, github, wt, locks = self._make_agent()
-        runner.run.return_value = SessionResult(success=True, reason="completed")
+        self._mock_isolated_runner(
+            agent, return_value=SessionResult(success=True, reason="completed"),
+        )
         issues = [
             {"number": 1, "title": "[P2] Bug 1"},
             {"number": 2, "title": "[P2] Bug 2"},
@@ -340,7 +352,7 @@ class TestParallelFixes:
     @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
     def test_parallel_handles_exceptions(self, _mock_check):
         agent, runner, github, wt, locks = self._make_agent()
-        runner.run.side_effect = RuntimeError("boom")
+        self._mock_isolated_runner(agent, side_effect=RuntimeError("boom"))
         issues = [
             {"number": 1, "title": "[P2] Bug 1"},
             {"number": 2, "title": "[P2] Bug 2"},
@@ -367,3 +379,53 @@ class TestParallelFixes:
         ]
         result = agent.run("/tmp", issues=issues)
         assert result["issues_processed"] == 2
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_parallel_creates_isolated_runners_with_distinct_monitors(self, _mock_check):
+        """Each parallel thread must get its own monitor to prevent cross-talk (issue #64).
+
+        Without per-thread isolation, a stop event from one session's monitor
+        can wake threads waiting on a different session, causing premature
+        completion and corrupted results.
+        """
+        from wiz.bridge.monitor import BridgeEventMonitor
+
+        agent, runner, github, wt, locks = self._make_agent()
+
+        # Set up the shared runner's attributes so _create_isolated_runner works
+        runner.monitor = MagicMock(spec=BridgeEventMonitor)
+        runner.monitor.base_url = "http://127.0.0.1:4003"
+        runner.client = MagicMock()
+        runner.client.health_check.return_value = True
+        runner.on_event = None
+        runner.init_wait = 0.01
+        runner.poll_interval = 0.01
+
+        # Collect runners created for each thread
+        created_runners = []
+        original_create = agent._create_isolated_runner
+
+        def tracking_create():
+            r = original_create()
+            # Mock the bridge calls so _process_issue can complete
+            r.run = MagicMock(
+                return_value=SessionResult(success=True, reason="completed")
+            )
+            created_runners.append(r)
+            return r
+
+        agent._create_isolated_runner = tracking_create
+
+        issues = [
+            {"number": 1, "title": "[P2] Bug 1"},
+            {"number": 2, "title": "[P2] Bug 2"},
+        ]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["issues_processed"] == 2
+        assert len(created_runners) == 2
+        # Each runner must have its own distinct monitor instance
+        monitors = [r.monitor for r in created_runners]
+        assert monitors[0] is not monitors[1], (
+            "Parallel threads must have distinct monitors to avoid shared stop events"
+        )

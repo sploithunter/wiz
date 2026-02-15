@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from wiz.agents.base import BaseAgent
+from wiz.bridge.monitor import BridgeEventMonitor
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import BugFixerConfig
@@ -170,9 +171,11 @@ Pay close attention to this feedback. The fix was rejected for specific reasons 
         }
 
     def _process_issue(
-        self, issue: dict, cwd: str, timeout: float
+        self, issue: dict, cwd: str, timeout: float,
+        runner: SessionRunner | None = None,
     ) -> dict[str, Any]:
         """Process a single issue: acquire locks, fix in worktree, push."""
+        runner = runner or self.runner
         number = issue.get("number", 0)
         title = issue.get("title", "")
         owner = "bug-fixer"
@@ -201,7 +204,7 @@ Pay close attention to this feedback. The fix was rejected for specific reasons 
 
             # Build and run
             prompt = self.build_prompt(issue=issue)
-            result = self.runner.run(
+            result = runner.run(
                 name=f"wiz-bug-fixer-{number}",
                 cwd=work_dir,
                 prompt=prompt,
@@ -288,6 +291,21 @@ Pay close attention to this feedback. The fix was rejected for specific reasons 
 
         return {"issues_processed": len(results), "results": results}
 
+    def _create_isolated_runner(self) -> SessionRunner:
+        """Create a SessionRunner with its own BridgeEventMonitor for thread safety."""
+        monitor = BridgeEventMonitor(
+            base_url=self.runner.monitor.base_url,
+            on_event=self.runner.on_event,
+        )
+        return SessionRunner(
+            client=self.runner.client,
+            monitor=monitor,
+            init_wait=self.runner.init_wait,
+            poll_interval=self.runner.poll_interval,
+            on_event=self.runner.on_event,
+            cleanup_on_start=False,
+        )
+
     def _run_parallel(
         self, issues: list[dict], cwd: str, timeout: float,
     ) -> list[dict[str, Any]]:
@@ -297,7 +315,10 @@ Pay close attention to this feedback. The fix was rejected for specific reasons 
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_issue = {
-                executor.submit(self._process_issue, issue, cwd, timeout): issue
+                executor.submit(
+                    self._process_issue, issue, cwd, timeout,
+                    runner=self._create_isolated_runner(),
+                ): issue
                 for issue in issues
             }
             for future in as_completed(future_to_issue):
