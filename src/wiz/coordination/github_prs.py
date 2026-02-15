@@ -44,7 +44,7 @@ class GitHubPRs:
         try:
             result = self._run_gh(args)
             return result.stdout.strip()
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             logger.error("Failed to create PR: %s", e)
             return None
 
@@ -59,7 +59,7 @@ class GitHubPRs:
         try:
             result = self._run_gh(args)
             return json.loads(result.stdout) if result.stdout.strip() else []
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
             return []
 
     def get_pr(self, pr_number: int) -> dict[str, Any] | None:
@@ -71,5 +71,5 @@ class GitHubPRs:
         try:
             result = self._run_gh(args)
             return json.loads(result.stdout) if result.stdout.strip() else None
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
             return None

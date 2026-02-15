@@ -47,7 +47,7 @@ class GitHubIssues:
                     check=True, timeout=15,
                 )
                 self._ensured_labels.add(label)
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
                 logger.warning("Could not ensure label %r exists", label)
 
     def create_issue(
@@ -63,7 +63,7 @@ class GitHubIssues:
         try:
             result = self._run_gh(args)
             return result.stdout.strip()
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
             logger.error("Failed to create issue: %s", e)
             return None
 
@@ -87,7 +87,7 @@ class GitHubIssues:
         try:
             result = self._run_gh(args)
             issues = json.loads(result.stdout) if result.stdout.strip() else []
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
             return []
 
         return self._filter_by_author(issues)
@@ -129,7 +129,7 @@ class GitHubIssues:
                  "number,title,labels,state,url,body,author"]
             )
             issue = json.loads(result.stdout) if result.stdout.strip() else None
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
             return None
 
         if issue is None:
@@ -144,7 +144,7 @@ class GitHubIssues:
         try:
             self._run_gh(args)
             return True
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
     def update_labels(
@@ -166,7 +166,7 @@ class GitHubIssues:
                     ["issue", "edit", str(issue_number), "--remove-label", ",".join(remove)]
                 )
             return True
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
     def close_issue(self, issue_number: int) -> bool:
@@ -174,7 +174,7 @@ class GitHubIssues:
         try:
             self._run_gh(["issue", "close", str(issue_number)])
             return True
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
     def reopen_issue(self, issue_number: int) -> bool:
@@ -182,7 +182,7 @@ class GitHubIssues:
         try:
             self._run_gh(["issue", "reopen", str(issue_number)])
             return True
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
     def check_duplicate(self, title: str) -> bool:

@@ -47,3 +47,25 @@ class TestGitHubPRs:
     def test_get_pr_not_found(self, mock_run):
         mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
         assert self.prs.get_pr(999) is None
+
+
+class TestGhMissing:
+    """Regression tests for missing gh CLI (FileNotFoundError)."""
+
+    def setup_method(self):
+        self.prs = GitHubPRs("user/repo")
+
+    @patch("wiz.coordination.github_prs.subprocess.run")
+    def test_list_prs_returns_empty_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.prs.list_prs() == []
+
+    @patch("wiz.coordination.github_prs.subprocess.run")
+    def test_create_pr_returns_none_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.prs.create_pr("title", "body", head="branch") is None
+
+    @patch("wiz.coordination.github_prs.subprocess.run")
+    def test_get_pr_returns_none_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.prs.get_pr(1) is None

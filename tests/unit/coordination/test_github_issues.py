@@ -221,3 +221,56 @@ class TestAuthorFiltering:
         result = gh.get_issue(42)
         assert result is not None
         assert result["number"] == 42
+
+
+class TestGhMissing:
+    """Regression tests for missing gh CLI (FileNotFoundError)."""
+
+    def setup_method(self):
+        self.gh = GitHubIssues("user/repo")
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_list_issues_returns_empty_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.list_issues() == []
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_create_issue_returns_none_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.create_issue("title", "body") is None
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_get_issue_returns_none_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.get_issue(1) is None
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_add_comment_returns_false_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.add_comment(1, "text") is False
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_update_labels_returns_false_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.update_labels(1, add=["bug"]) is False
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_close_issue_returns_false_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.close_issue(1) is False
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_reopen_issue_returns_false_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.reopen_issue(1) is False
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_check_duplicate_returns_false_when_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.check_duplicate("some title") is False
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_ensure_labels_tolerates_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        # Should not raise
+        self.gh.ensure_labels(["bug", "wiz"])
