@@ -159,6 +159,9 @@ class BugFixerAgent(BaseAgent):
                         number, add=["fix-stalled"], remove=["needs-fix"]
                     )
                     return {"issue": number, "stalled": True}
+                elif not files_changed:
+                    logger.warning("Issue #%d: session completed but no files changed", number)
+                    return {"issue": number, "fixed": False, "reason": "no-changes"}
                 else:
                     if self.worktree:
                         self.worktree.push("fix", number)
