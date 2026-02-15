@@ -13,6 +13,7 @@ from wiz.bridge.runner import SessionRunner
 from wiz.config.schema import RepoConfig, WizConfig
 from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.worktree import WorktreeManager
+from wiz.notifications.telegram import TelegramNotifier
 from wiz.orchestrator.state import CycleState
 
 logger = logging.getLogger(__name__)
@@ -39,11 +40,14 @@ class FeatureCyclePipeline:
             Path(repo.path), self.config.worktrees.base_dir,
         )
 
+        notifier = TelegramNotifier.from_config(self.config.telegram)
+
         logger.info("=== %s: feature_cycle ===", repo.name)
         try:
             runner = self._create_runner()
             agent = FeatureProposerAgent(
                 runner, self.config.agents.feature_proposer, github, worktree,
+                notifier=notifier,
             )
             result = agent.run(
                 repo.path,
