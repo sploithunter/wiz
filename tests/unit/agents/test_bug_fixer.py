@@ -26,13 +26,24 @@ class TestPriorityExtraction:
 
 class TestCheckFilesChanged:
     @patch("wiz.agents.bug_fixer.subprocess.run")
-    def test_returns_true_when_diff_exists(self, mock_run):
+    def test_returns_true_when_uncommitted_diff_exists(self, mock_run):
         mock_run.return_value = MagicMock(stdout=" src/foo.py | 3 +++\n 1 file changed")
         assert _check_files_changed("/tmp/wt") is True
 
     @patch("wiz.agents.bug_fixer.subprocess.run")
-    def test_returns_false_when_no_diff(self, mock_run):
-        mock_run.return_value = MagicMock(stdout="")
+    def test_returns_true_when_committed_changes_vs_main(self, mock_run):
+        """Detects committed changes by comparing branch to main."""
+        no_diff = MagicMock(stdout="")
+        has_commits = MagicMock(stdout="ae2f8f8 fix something\n", returncode=0)
+        mock_run.side_effect = [no_diff, has_commits]
+        assert _check_files_changed("/tmp/wt") is True
+
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_returns_false_when_no_diff_and_no_commits(self, mock_run):
+        no_diff = MagicMock(stdout="")
+        no_commits_main = MagicMock(stdout="", returncode=0)
+        no_commits_master = MagicMock(stdout="", returncode=0)
+        mock_run.side_effect = [no_diff, no_commits_main, no_commits_master]
         assert _check_files_changed("/tmp/wt") is False
 
     @patch("wiz.agents.bug_fixer.subprocess.run")

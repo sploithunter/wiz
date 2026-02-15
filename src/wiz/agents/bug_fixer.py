@@ -27,8 +27,9 @@ PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4"]
 
 
 def _check_files_changed(work_dir: str) -> bool:
-    """Check if any files were actually changed in the worktree via git."""
+    """Check if the branch has any changes vs main (committed or uncommitted)."""
     try:
+        # First check uncommitted changes against HEAD
         result = subprocess.run(
             ["git", "diff", "--stat", "HEAD"],
             cwd=work_dir,
@@ -36,7 +37,23 @@ def _check_files_changed(work_dir: str) -> bool:
             text=True,
             timeout=10,
         )
-        return bool(result.stdout.strip())
+        if result.stdout.strip():
+            return True
+
+        # Then check committed changes vs the base branch (main)
+        # This catches the case where Claude Code already committed the fix
+        for base in ("main", "master"):
+            result = subprocess.run(
+                ["git", "log", "--oneline", f"{base}..HEAD"],
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return True
+
+        return False
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         logger.debug("Could not check git diff in %s", work_dir)
         return False
