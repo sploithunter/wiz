@@ -11,7 +11,8 @@ Output each draft as a JSON code block. The calling code will parse these and cr
   "posts": [
     {"text": "The post text"},
     {"text": "Optional second post in thread"}
-  ]
+  ],
+  "image_prompt": "Detailed image generation prompt: style, subject, composition, mood, color palette. Suitable for DALL-E / Midjourney. Specify 16:9 for Twitter cards, 1:1 for LinkedIn."
 }
 ```
 

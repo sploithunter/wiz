@@ -1,6 +1,7 @@
 """Tests for blog writer agent."""
 
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from wiz.agents.blog_writer import BlogWriterAgent
 from wiz.bridge.runner import SessionRunner
@@ -35,7 +36,8 @@ class TestBlogWriterAgent:
         assert "Recent Topics" in prompt
         memory.retrieve.assert_called()
 
-    def test_process_result_updates_memory(self):
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_process_result_updates_memory(self, _mock_img):
         agent, _, memory = self._make_agent(with_memory=True)
         result = SessionResult(success=True, reason="completed")
         agent.process_result(result, topic="Test Topic", mode="write")
@@ -46,3 +48,25 @@ class TestBlogWriterAgent:
         result = SessionResult(success=False, reason="timeout")
         output = agent.process_result(result)
         assert output["success"] is False
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts")
+    def test_process_result_saves_image_prompts(self, mock_save):
+        mock_save.return_value = [Path("/tmp/prompt.md")]
+
+        agent, _, _ = self._make_agent()
+        json_block = '```json\n{"draft_title": "My Article", "image_prompt": "A sunset"}\n```'
+        result = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": json_block}}],
+        )
+        output = agent.process_result(result, mode="write")
+        assert output["image_prompts_saved"] == 1
+        mock_save.assert_called_once()
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_process_result_no_image_prompt(self, mock_save):
+        agent, _, _ = self._make_agent()
+        result = SessionResult(success=True, reason="completed", events=[])
+        output = agent.process_result(result, mode="write")
+        assert output["image_prompts_saved"] == 0

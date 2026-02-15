@@ -12,6 +12,7 @@ from wiz.agents.base import BaseAgent
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import SocialManagerConfig
+from wiz.integrations.image_prompts import save_all_image_prompts
 from wiz.integrations.typefully import DraftResult, TypefullyClient
 from wiz.memory.long_term import LongTermMemory
 
@@ -68,7 +69,8 @@ Output each draft as a JSON code block with this schema:
   "posts": [
     {{"text": "The post text for all platforms"}},
     {{"text": "Optional second post in thread"}}
-  ]
+  ],
+  "image_prompt": "Detailed prompt for image generation: style, subject, composition, mood, colors. 16:9 for X cards, 1:1 for LinkedIn."
 }}
 ```
 
@@ -142,6 +144,11 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             created = sum(1 for dr in draft_results if dr.success)
             logger.info("Created %d/%d Typefully drafts", created, len(draft_results))
 
+        # Save image prompts to files (separate from Typefully)
+        image_prompt_paths = save_all_image_prompts(drafts_parsed, source="social")
+        if image_prompt_paths:
+            logger.info("Saved %d image prompts", len(image_prompt_paths))
+
         if result.success and self.memory:
             self.memory.update_topic(
                 "recent-social", "recent-social.md", "Posted social content"
@@ -152,6 +159,7 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             "reason": result.reason,
             "drafts_parsed": len(drafts_parsed),
             "drafts_created": sum(1 for dr in draft_results if dr.success),
+            "image_prompts_saved": len(image_prompt_paths),
         }
 
 

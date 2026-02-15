@@ -1,6 +1,6 @@
 """Tests for social manager agent."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from wiz.agents.social_manager import SocialManagerAgent, _extract_json_blocks
 from wiz.bridge.runner import SessionRunner
@@ -54,19 +54,22 @@ class TestSocialManagerAgent:
         prompt = agent.build_prompt()
         assert prompt == ""
 
-    def test_successful_run_updates_memory(self):
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_successful_run_updates_memory(self, _mock_img):
         agent, runner, memory = self._make_agent(with_memory=True)
         runner.run.return_value = SessionResult(success=True, reason="completed")
         agent.run("/tmp")
         memory.update_topic.assert_called_once()
 
-    def test_run_sends_correct_agent_type(self):
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_sends_correct_agent_type(self, _mock_img):
         agent, runner, _ = self._make_agent()
         runner.run.return_value = SessionResult(success=True, reason="completed")
         agent.run("/tmp")
         assert runner.run.call_args[1]["agent"] == "claude"
 
-    def test_run_creates_typefully_drafts(self):
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_creates_typefully_drafts(self, _mock_img):
         typefully = MagicMock(spec=TypefullyClient)
         typefully.enabled = True
         typefully.create_draft.return_value = DraftResult(success=True, draft_id=42)
@@ -88,7 +91,8 @@ class TestSocialManagerAgent:
         call_kwargs = typefully.create_draft.call_args[1]
         assert call_kwargs["platforms"] == ["x", "linkedin"]
 
-    def test_run_skips_typefully_when_disabled(self):
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_skips_typefully_when_disabled(self, _mock_img):
         typefully = MagicMock(spec=TypefullyClient)
         typefully.enabled = False
 
@@ -105,7 +109,8 @@ class TestSocialManagerAgent:
         assert result["drafts_created"] == 0
         typefully.create_draft.assert_not_called()
 
-    def test_run_handles_no_json_output(self):
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_handles_no_json_output(self, _mock_img):
         typefully = MagicMock(spec=TypefullyClient)
         typefully.enabled = True
 
@@ -119,6 +124,26 @@ class TestSocialManagerAgent:
         result = agent.run("/tmp")
         assert result["drafts_parsed"] == 0
         assert result["drafts_created"] == 0
+
+    @patch("wiz.agents.social_manager.save_all_image_prompts")
+    def test_run_saves_image_prompts(self, mock_save):
+        from pathlib import Path
+        mock_save.return_value = [Path("/tmp/prompt.md")]
+
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = False
+
+        agent, runner, _ = self._make_agent(typefully=typefully)
+        json_output = '```json\n{"draft_title": "Test", "posts": [{"text": "hi"}], "image_prompt": "A robot"}\n```'
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": json_output}}],
+        )
+
+        result = agent.run("/tmp")
+        assert result["image_prompts_saved"] == 1
+        mock_save.assert_called_once()
 
 
 class TestExtractJsonBlocks:
