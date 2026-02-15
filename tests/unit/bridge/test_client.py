@@ -53,6 +53,17 @@ class TestBridgeClient:
         assert payload["model"] == "opus"
 
     @patch("wiz.bridge.client.requests.post")
+    def test_create_session_flags_converted_to_object(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"id": "s1"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+        self.client.create_session("test", "/tmp", flags=["--chrome", "--verbose"])
+        payload = mock_post.call_args[1]["json"]
+        assert payload["flags"] == {"chrome": True, "verbose": True}
+
+    @patch("wiz.bridge.client.requests.post")
     def test_create_session_error(self, mock_post):
         mock_post.side_effect = requests.ConnectionError()
         assert self.client.create_session("test", "/tmp") is None

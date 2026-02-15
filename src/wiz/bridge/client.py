@@ -85,7 +85,10 @@ class BridgeClient:
         if model:
             payload["model"] = model
         if flags:
-            payload["flags"] = flags
+            # Bridge expects flags as object {"flag": true}, not array
+            payload["flags"] = {
+                f.lstrip("-"): True for f in flags
+            }
 
         try:
             def _create() -> str | None:
