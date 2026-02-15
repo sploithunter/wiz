@@ -10,19 +10,26 @@ global:
   timezone: "America/New_York"
   # machine_id: "macbook-1"  # Uncomment to enable distributed locking across machines
 
-# --- Repositories ---
+# --- Repositories (processed in order — first gets most time budget) ---
 repos:
   - name: "wiz"
     path: "/Users/jason/Documents/wiz"
     github: "sploithunter/wiz"
     enabled: true
     self_improve: true
-    allowed_issue_authors:  # Only these GitHub users can create issues agents will process
+    allowed_issue_authors:
       - "sploithunter"
 
-  - name: "harness-bench"
-    path: "/Users/jason/Documents/harness-bench"
-    github: "sploithunter/harnesss-bench"
+  - name: "CIN"
+    path: "/Users/jason/Documents/CIN"
+    github: "sploithunter/CIN"
+    enabled: true
+    allowed_issue_authors:
+      - "sploithunter"
+
+  - name: "CIN-Interface"
+    path: "/Users/jason/Documents/CIN-Interface"
+    github: "sploithunter/CIN-Interface"
     enabled: true
     allowed_issue_authors:
       - "sploithunter"
@@ -34,6 +41,20 @@ repos:
     allowed_issue_authors:
       - "sploithunter"
       - "jasonjmcghee"
+
+  - name: "meta-harness"
+    path: "/Users/jason/Documents/meta-harness"
+    github: "sploithunter/meta-harness"
+    enabled: true
+    allowed_issue_authors:
+      - "sploithunter"
+
+  - name: "harness-bench"
+    path: "/Users/jason/Documents/harness-bench"
+    github: "sploithunter/harnesss-bench"
+    enabled: true
+    allowed_issue_authors:
+      - "sploithunter"
 
   - name: "solar"
     path: "/Users/jason/Documents/solar"
@@ -108,18 +129,18 @@ dev_cycle:
   parallel_fixes: false
 
 # --- Scheduling ---
-# Per-phase scheduling (staggered, 2-hour minimum between runs).
-# Bug hunt and review (Codex) on odd hours, bug fix (Claude) on even hours.
+# Hunt + Review on odd hours (don't conflict — one creates issues, other checks PRs).
+# Bug Fix on even hours (runs Claude sessions in worktrees, needs exclusive time).
 schedule:
   bug_hunt:
     enabled: true
     times:
-      - "07:00"
       - "09:00"
       - "11:00"
       - "13:00"
       - "15:00"
-    days: ["mon", "tue", "wed", "thu", "fri"]
+      - "17:00"
+    days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
   bug_fix:
     enabled: true
@@ -129,7 +150,7 @@ schedule:
       - "12:00"
       - "14:00"
       - "16:00"
-    days: ["mon", "tue", "wed", "thu", "fri"]
+    days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
   review:
     enabled: true
@@ -139,19 +160,19 @@ schedule:
       - "13:00"
       - "15:00"
       - "17:00"
-    days: ["mon", "tue", "wed", "thu", "fri"]
+    days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
   feature_cycle:
     enabled: true
     times:
       - "09:00"
-    days: ["mon", "wed", "fri"]
+    days: ["mon", "wed", "fri", "sun"]
 
   content_cycle:
     enabled: true
     times:
       - "10:00"
-    days: ["tue", "thu"]
+    days: ["tue", "thu", "sat"]
 
 # --- Worktrees ---
 worktrees:
