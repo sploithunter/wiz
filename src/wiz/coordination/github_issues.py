@@ -106,7 +106,7 @@ class GitHubIssues:
 
         allowed: list[dict[str, Any]] = []
         for issue in issues:
-            author = issue.get("author", {})
+            author = issue.get("author") or {}
             login = (author.get("login") or "").lower()
             number = issue.get("number", "?")
             if login in self._allowed_authors:
