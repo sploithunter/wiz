@@ -49,6 +49,33 @@ class TestGitHubPRs:
         assert self.prs.get_pr(999) is None
 
 
+class TestMergePR:
+    def setup_method(self):
+        self.prs = GitHubPRs("user/repo")
+
+    @patch("wiz.coordination.github_prs.subprocess.run")
+    def test_merge_pr_success(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        assert self.prs.merge_pr(42) is True
+        cmd = mock_run.call_args[0][0]
+        assert "merge" in cmd
+        assert "42" in cmd
+        assert "--squash" in cmd
+        assert "--delete-branch" in cmd
+
+    @patch("wiz.coordination.github_prs.subprocess.run")
+    def test_merge_pr_failure(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+        assert self.prs.merge_pr(42) is False
+
+    @patch("wiz.coordination.github_prs.subprocess.run")
+    def test_merge_pr_no_delete_branch(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        self.prs.merge_pr(42, delete_branch=False)
+        cmd = mock_run.call_args[0][0]
+        assert "--delete-branch" not in cmd
+
+
 class TestGhMissing:
     """Regression tests for missing gh CLI (FileNotFoundError)."""
 

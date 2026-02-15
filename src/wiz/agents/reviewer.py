@@ -201,12 +201,23 @@ If the fix is inadequate:
                                 number,
                             )
 
+                    merged = False
                     if not needs_human:
+                        # Auto-merge if enabled
+                        if self.reviewer_config.auto_merge:
+                            pr_number = self._extract_pr_number(pr_url)
+                            if pr_number:
+                                merged = self.prs.merge_pr(pr_number)
+                                if merged:
+                                    logger.info("Issue #%d: PR #%d merged", number, pr_number)
+                                else:
+                                    logger.warning("Issue #%d: PR #%d merge failed", number, pr_number)
                         self.github.close_issue(number)
                     results.append({
                         "issue": number,
                         "action": "approved",
                         "pr": pr_url,
+                        "merged": merged,
                         "needs_human_review": needs_human,
                     })
                 else:
@@ -318,6 +329,12 @@ If the fix is inadequate:
         if re.search(r"\bAPPROVED\b", upper):
             return True
         return None
+
+    @staticmethod
+    def _extract_pr_number(pr_url: str) -> int | None:
+        """Extract PR number from a GitHub PR URL."""
+        match = re.search(r"/pull/(\d+)", pr_url)
+        return int(match.group(1)) if match else None
 
     def _get_branch_files(self, branch: str) -> list[str]:
         """Get list of files changed in the branch vs main."""

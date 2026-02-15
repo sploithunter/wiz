@@ -62,6 +62,27 @@ class GitHubPRs:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
             return []
 
+    def merge_pr(
+        self,
+        pr_number: int,
+        method: str = "squash",
+        delete_branch: bool = True,
+    ) -> bool:
+        """Merge a PR. Returns True on success."""
+        args = [
+            "pr", "merge", str(pr_number),
+            f"--{method}",
+        ]
+        if delete_branch:
+            args.append("--delete-branch")
+        try:
+            self._run_gh(args)
+            logger.info("Merged PR #%d (%s)", pr_number, method)
+            return True
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            logger.error("Failed to merge PR #%d: %s", pr_number, e)
+            return False
+
     def get_pr(self, pr_number: int) -> dict[str, Any] | None:
         """Get PR details."""
         args = [

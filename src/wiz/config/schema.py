@@ -45,6 +45,7 @@ class ReviewerConfig(BaseModel):
     max_reviews_per_run: int = 10
     max_review_cycles: int = 3
     session_timeout: int = 300
+    auto_merge: bool = True
     flags: list[str] = Field(default_factory=list)
 
 

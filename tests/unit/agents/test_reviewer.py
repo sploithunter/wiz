@@ -47,7 +47,8 @@ class TestReviewerAgent:
         prs.create_pr.assert_called_once()
         github.close_issue.assert_called_once_with(1)
 
-    def test_pr_creation_failure_does_not_close_issue(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_pr_creation_failure_does_not_close_issue(self, mock_files, tmp_path: Path):
         """When PR creation fails (returns None), issue must NOT be closed."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         runner.run.return_value = SessionResult(
@@ -380,6 +381,83 @@ class TestOutputFieldApproval:
             output='```json\n{"verdict": "rejected", "reason": "missing tests"}\n```',
         )
         assert agent._check_approval(result) is False
+
+
+class TestAutoMerge:
+    """Test auto-merge after PR creation."""
+
+    def _make_agent(self, tmp_path, auto_merge=True):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig(auto_merge=auto_merge)
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+            repo_name="test/repo",
+        ), runner, github, prs
+
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_auto_merge_after_pr_creation(self, mock_files, tmp_path):
+        agent, runner, github, prs = self._make_agent(tmp_path, auto_merge=True)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "https://github.com/test/repo/pull/42"
+        prs.merge_pr.return_value = True
+
+        issues = [{"number": 5, "title": "Bug", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["merged"] is True
+        prs.merge_pr.assert_called_once_with(42)
+        github.close_issue.assert_called_once_with(5)
+
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_auto_merge_disabled(self, mock_files, tmp_path):
+        agent, runner, github, prs = self._make_agent(tmp_path, auto_merge=False)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "https://github.com/test/repo/pull/42"
+
+        issues = [{"number": 5, "title": "Bug", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["merged"] is False
+        prs.merge_pr.assert_not_called()
+        github.close_issue.assert_called_once_with(5)
+
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_merge_failure_still_closes_issue(self, mock_files, tmp_path):
+        agent, runner, github, prs = self._make_agent(tmp_path, auto_merge=True)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "https://github.com/test/repo/pull/42"
+        prs.merge_pr.return_value = False  # Merge failed
+
+        issues = [{"number": 5, "title": "Bug", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["merged"] is False
+        github.close_issue.assert_called_once_with(5)
+
+
+class TestExtractPrNumber:
+    def test_standard_url(self):
+        assert ReviewerAgent._extract_pr_number("https://github.com/test/repo/pull/42") == 42
+
+    def test_no_match(self):
+        assert ReviewerAgent._extract_pr_number("https://github.com/test/repo") is None
+
+    def test_url_with_trailing(self):
+        assert ReviewerAgent._extract_pr_number("https://github.com/test/repo/pull/123/files") == 123
 
 
 class TestSelfImprovementGuard:
