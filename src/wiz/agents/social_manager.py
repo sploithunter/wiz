@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,7 @@ from wiz.agents.base import BaseAgent
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import SocialManagerConfig
+from wiz.integrations.typefully import DraftResult, TypefullyClient
 from wiz.memory.long_term import LongTermMemory
 
 logger = logging.getLogger(__name__)
@@ -28,10 +31,12 @@ class SocialManagerAgent(BaseAgent):
         runner: SessionRunner,
         config: SocialManagerConfig,
         memory: LongTermMemory | None = None,
+        typefully: TypefullyClient | None = None,
     ) -> None:
         super().__init__(runner, config)
         self.social_config = config
         self.memory = memory
+        self.typefully = typefully or TypefullyClient.from_config(config)
 
     def build_prompt(self, **kwargs: Any) -> str:
         if self.social_config.social_posts_per_week == 0:
@@ -55,10 +60,63 @@ class SocialManagerAgent(BaseAgent):
 
 ## Task
 Create social media drafts for: {platforms}
-Use Typefully MCP tools (typefully_create_draft) to save drafts.
-All drafts are saved for review - never auto-publish.
+Output each draft as a JSON code block with this schema:
+
+```json
+{{
+  "draft_title": "Short internal title",
+  "posts": [
+    {{"text": "The post text for all platforms"}},
+    {{"text": "Optional second post in thread"}}
+  ]
+}}
+```
+
+You may output multiple JSON blocks for multiple drafts.
+All drafts are saved for review — never auto-publish.
 Create up to {self.social_config.social_posts_per_week} drafts.
 """
+
+    @staticmethod
+    def _parse_posts_from_result(result: SessionResult) -> list[dict[str, Any]]:
+        """Extract JSON draft blocks from session result events."""
+        text_chunks: list[str] = []
+        for event in result.events:
+            data = event.get("data", {})
+            # assistant_message events contain the response text
+            message = data.get("message", "")
+            if message:
+                text_chunks.append(message)
+            # Also check for text in the event directly
+            text = event.get("text", "")
+            if text:
+                text_chunks.append(text)
+
+        full_text = "\n".join(text_chunks)
+
+        # Also try the result reason as fallback (some setups put output there)
+        if not full_text.strip() and result.reason:
+            full_text = result.reason
+
+        return _extract_json_blocks(full_text)
+
+    def _create_typefully_drafts(
+        self, drafts: list[dict[str, Any]]
+    ) -> list[DraftResult]:
+        """Create Typefully drafts from parsed JSON blocks."""
+        results: list[DraftResult] = []
+        for draft in drafts:
+            posts = draft.get("posts", [])
+            if not posts:
+                continue
+            title = draft.get("draft_title")
+            dr = self.typefully.create_draft(
+                posts=posts,
+                platforms=self.social_config.platforms,
+                draft_title=title,
+            )
+            results.append(dr)
+        return results
 
     def process_result(self, result: SessionResult, **kwargs: Any) -> dict[str, Any]:
         return {"success": result.success, "reason": result.reason}
@@ -76,9 +134,36 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             timeout=timeout,
         )
 
+        # Parse Claude's JSON output and create Typefully drafts
+        drafts_parsed = self._parse_posts_from_result(result)
+        draft_results: list[DraftResult] = []
+        if drafts_parsed and self.typefully.enabled:
+            draft_results = self._create_typefully_drafts(drafts_parsed)
+            created = sum(1 for dr in draft_results if dr.success)
+            logger.info("Created %d/%d Typefully drafts", created, len(draft_results))
+
         if result.success and self.memory:
             self.memory.update_topic(
                 "recent-social", "recent-social.md", "Posted social content"
             )
 
-        return self.process_result(result)
+        return {
+            "success": result.success,
+            "reason": result.reason,
+            "drafts_parsed": len(drafts_parsed),
+            "drafts_created": sum(1 for dr in draft_results if dr.success),
+        }
+
+
+def _extract_json_blocks(text: str) -> list[dict[str, Any]]:
+    """Extract JSON objects from ```json code blocks in text."""
+    blocks: list[dict[str, Any]] = []
+    pattern = r"```json\s*\n(.*?)\n\s*```"
+    for match in re.finditer(pattern, text, re.DOTALL):
+        try:
+            obj = json.loads(match.group(1))
+            if isinstance(obj, dict):
+                blocks.append(obj)
+        except json.JSONDecodeError:
+            logger.debug("Failed to parse JSON block: %s", match.group(1)[:100])
+    return blocks

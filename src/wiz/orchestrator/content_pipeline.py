@@ -12,6 +12,7 @@ from wiz.bridge.client import BridgeClient
 from wiz.bridge.monitor import BridgeEventMonitor
 from wiz.bridge.runner import SessionRunner
 from wiz.config.schema import WizConfig
+from wiz.integrations.typefully import TypefullyClient
 from wiz.memory.long_term import LongTermMemory
 from wiz.orchestrator.state import CycleState
 
@@ -53,7 +54,8 @@ class ContentCyclePipeline:
             logger.info("=== content: social_manage ===")
             phase_start = time.time()
             runner = self._create_runner()
-            social = SocialManagerAgent(runner, self.config.agents.social_manager, memory)
+            typefully = TypefullyClient.from_config(self.config.agents.social_manager)
+            social = SocialManagerAgent(runner, self.config.agents.social_manager, memory, typefully)
             result = social.run(".", timeout=self.config.agents.social_manager.session_timeout)
             logger.info("=== content: social_manage completed (%.1fs) ===", time.time() - phase_start)
             state.add_phase("social_manage", result.get("success", False), result)

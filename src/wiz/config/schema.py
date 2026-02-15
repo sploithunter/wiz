@@ -70,6 +70,7 @@ class SocialManagerConfig(BaseModel):
     platforms: list[str] = Field(default_factory=lambda: ["x"])
     require_approval: bool = True
     session_timeout: int = 300
+    typefully_social_set_id: int = 0  # 0 = disabled
     flags: list[str] = Field(default_factory=list)
 
 
