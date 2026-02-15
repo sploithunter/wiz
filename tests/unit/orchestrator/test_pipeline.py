@@ -3,7 +3,7 @@
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
-from wiz.config.schema import DevCycleConfig, GlobalConfig, WizConfig
+from wiz.config.schema import DevCycleConfig, GlobalConfig, RepoConfig, WizConfig
 from wiz.notifications.telegram import TelegramNotifier
 from wiz.orchestrator.pipeline import DevCyclePipeline
 
@@ -117,3 +117,42 @@ class TestDevCyclePipeline:
         with patch("wiz.orchestrator.pipeline.DistributedLockManager") as mock_dlock:
             pipeline.run_repo(config.repos[0])
             mock_dlock.assert_not_called()
+
+    @patch("wiz.orchestrator.pipeline.ReviewerAgent")
+    @patch("wiz.orchestrator.pipeline.SessionRunner")
+    @patch("wiz.orchestrator.pipeline.BridgeClient")
+    @patch("wiz.orchestrator.pipeline.BridgeEventMonitor")
+    def test_self_improve_passed_to_reviewer(
+        self, mock_monitor, mock_client, mock_runner, mock_reviewer
+    ):
+        """Regression test for #35: repo.self_improve must be forwarded to ReviewerAgent."""
+        config = WizConfig(
+            repos=[RepoConfig(
+                name="demo", path="/tmp/demo", github="owner/repo", self_improve=True,
+            )],
+            dev_cycle=DevCycleConfig(phases=["review"]),
+        )
+        notifier = MagicMock(spec=TelegramNotifier)
+        pipeline = DevCyclePipeline(config, notifier)
+        mock_reviewer.return_value = MagicMock(run=MagicMock(return_value={"reviews": 0}))
+
+        pipeline.run_repo(config.repos[0])
+
+        _, kwargs = mock_reviewer.call_args
+        assert kwargs.get("self_improve") is True
+
+    @patch("wiz.orchestrator.pipeline.ReviewerAgent")
+    @patch("wiz.orchestrator.pipeline.SessionRunner")
+    @patch("wiz.orchestrator.pipeline.BridgeClient")
+    @patch("wiz.orchestrator.pipeline.BridgeEventMonitor")
+    def test_self_improve_false_by_default(
+        self, mock_monitor, mock_client, mock_runner, mock_reviewer
+    ):
+        """Ensure self_improve=False is passed when repo doesn't set it."""
+        pipeline, config = self._make_pipeline(phases=["review"])
+        mock_reviewer.return_value = MagicMock(run=MagicMock(return_value={"reviews": 0}))
+
+        pipeline.run_repo(config.repos[0])
+
+        _, kwargs = mock_reviewer.call_args
+        assert kwargs.get("self_improve") is False

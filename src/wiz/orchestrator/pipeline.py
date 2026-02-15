@@ -178,6 +178,7 @@ class DevCyclePipeline:
             self.notifier,
             repo_name=repo.name,
             distributed_locks=distributed_locks,
+            self_improve=repo.self_improve,
         )
         return agent.run(
             repo.path,
