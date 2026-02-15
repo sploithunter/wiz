@@ -15,6 +15,23 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = Path(__file__).parent.parent.parent / "config" / "wiz.yaml"
 
 
+def _resolve_wiz_dir(config_path: Path) -> Path:
+    """Resolve the wiz repo root from a config path.
+
+    Walks upward from the config's directory looking for scripts/wake.sh.
+    Falls back to the config file's parent directory.
+    """
+    current = config_path.resolve().parent
+    for _ in range(10):
+        if (current / "scripts" / "wake.sh").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return config_path.resolve().parent
+
+
 @click.group()
 @click.version_option(version=__version__)
 @click.option("--config", "-c", type=click.Path(), default=None, help="Config file path")
@@ -166,7 +183,7 @@ def status(ctx: click.Context) -> None:
         self_str = " (self-improve)" if r.self_improve else ""
         click.echo(f"  {r.name}: {status_str}{self_str}")
 
-    wiz_dir = ctx.obj["config_path"].parent.parent
+    wiz_dir = _resolve_wiz_dir(ctx.obj["config_path"])
     scheduler = LaunchdScheduler(wiz_dir)
     schedules = scheduler.status()
     if schedules:
@@ -190,7 +207,7 @@ def schedule_install(ctx: click.Context) -> None:
     from wiz.orchestrator.scheduler import LaunchdScheduler
 
     config = load_config(ctx.obj["config_path"])
-    wiz_dir = ctx.obj["config_path"].parent.parent
+    wiz_dir = _resolve_wiz_dir(ctx.obj["config_path"])
     scheduler = LaunchdScheduler(wiz_dir)
 
     # Per-phase schedules override the combined dev_cycle if present
@@ -233,7 +250,7 @@ def schedule_uninstall(ctx: click.Context) -> None:
     """Uninstall all launchd schedules."""
     from wiz.orchestrator.scheduler import LaunchdScheduler
 
-    wiz_dir = ctx.obj["config_path"].parent.parent
+    wiz_dir = _resolve_wiz_dir(ctx.obj["config_path"])
     scheduler = LaunchdScheduler(wiz_dir)
 
     for s in scheduler.status():
@@ -249,7 +266,7 @@ def schedule_status(ctx: click.Context) -> None:
     """Show installed schedules."""
     from wiz.orchestrator.scheduler import LaunchdScheduler
 
-    wiz_dir = ctx.obj["config_path"].parent.parent
+    wiz_dir = _resolve_wiz_dir(ctx.obj["config_path"])
     scheduler = LaunchdScheduler(wiz_dir)
     schedules = scheduler.status()
 
