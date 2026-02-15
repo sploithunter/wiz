@@ -169,9 +169,21 @@ If the fix is inadequate:
                         head=branch,
                     )
 
+                    if not pr_url:
+                        logger.error("Issue #%d: PR creation failed", number)
+                        self.github.add_comment(
+                            number, "Review approved but PR creation failed. Keeping issue open."
+                        )
+                        results.append({
+                            "issue": number,
+                            "action": "pr_failed",
+                            "pr": None,
+                        })
+                        continue
+
                     # Check self-improvement guard for protected files
                     needs_human = False
-                    if self.guard and pr_url:
+                    if self.guard:
                         changed_files = self._get_branch_files(branch)
                         guard_result = self.guard.validate_changes(changed_files)
                         if guard_result["needs_human_review"]:
