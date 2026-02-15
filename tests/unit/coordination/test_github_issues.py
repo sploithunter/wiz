@@ -112,3 +112,112 @@ class TestGitHubIssues:
         assert self.gh.create_issue("title", "body") is None
         assert self.gh.list_issues() == []
         assert self.gh.add_comment(1, "text") is False
+
+
+class TestAuthorFiltering:
+    """Tests for procedural author allowlist — security boundary."""
+
+    def test_no_allowlist_passes_all(self):
+        gh = GitHubIssues("user/repo")
+        issues = [
+            {"number": 1, "author": {"login": "anyone"}, "title": "Bug"},
+            {"number": 2, "author": {"login": "attacker"}, "title": "Hack"},
+        ]
+        assert len(gh._filter_by_author(issues)) == 2
+
+    def test_allowlist_blocks_unauthorized(self):
+        gh = GitHubIssues("user/repo", allowed_authors=["trusted-user"])
+        issues = [
+            {"number": 1, "author": {"login": "trusted-user"}, "title": "Real bug"},
+            {"number": 2, "author": {"login": "attacker"}, "title": "Inject me"},
+        ]
+        result = gh._filter_by_author(issues)
+        assert len(result) == 1
+        assert result[0]["number"] == 1
+
+    def test_allowlist_case_insensitive(self):
+        gh = GitHubIssues("user/repo", allowed_authors=["TrustedUser"])
+        issues = [
+            {"number": 1, "author": {"login": "trusteduser"}, "title": "Bug"},
+        ]
+        assert len(gh._filter_by_author(issues)) == 1
+
+    def test_allowlist_blocks_missing_author(self):
+        gh = GitHubIssues("user/repo", allowed_authors=["trusted"])
+        issues = [
+            {"number": 1, "title": "No author field"},
+        ]
+        assert len(gh._filter_by_author(issues)) == 0
+
+    def test_allowlist_blocks_empty_login(self):
+        gh = GitHubIssues("user/repo", allowed_authors=["trusted"])
+        issues = [
+            {"number": 1, "author": {"login": ""}, "title": "Empty login"},
+        ]
+        assert len(gh._filter_by_author(issues)) == 0
+
+    def test_allowlist_multiple_allowed(self):
+        gh = GitHubIssues("user/repo", allowed_authors=["alice", "bob"])
+        issues = [
+            {"number": 1, "author": {"login": "alice"}, "title": "A"},
+            {"number": 2, "author": {"login": "bob"}, "title": "B"},
+            {"number": 3, "author": {"login": "eve"}, "title": "C"},
+        ]
+        result = gh._filter_by_author(issues)
+        assert len(result) == 2
+        assert {r["number"] for r in result} == {1, 2}
+
+    def test_empty_allowlist_means_no_filter(self):
+        """Empty list = no allowlist = accept all (backward compat)."""
+        gh = GitHubIssues("user/repo", allowed_authors=[])
+        assert gh._allowed_authors is None
+        issues = [{"number": 1, "author": {"login": "anyone"}}]
+        assert len(gh._filter_by_author(issues)) == 1
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_list_issues_filters_by_author(self, mock_run):
+        gh = GitHubIssues("user/repo", allowed_authors=["trusted"])
+        issues = [
+            {"number": 1, "author": {"login": "trusted"}, "title": "OK"},
+            {"number": 2, "author": {"login": "attacker"}, "title": "Inject"},
+        ]
+        mock_run.return_value = MagicMock(stdout=json.dumps(issues), returncode=0)
+        result = gh.list_issues(labels=["wiz-bug"])
+        assert len(result) == 1
+        assert result[0]["number"] == 1
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_list_issues_includes_author_in_json_fields(self, mock_run):
+        gh = GitHubIssues("user/repo")
+        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        gh.list_issues()
+        cmd = mock_run.call_args[0][0]
+        json_arg_idx = cmd.index("--json")
+        fields = cmd[json_arg_idx + 1]
+        assert "author" in fields
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_get_issue_rejects_unauthorized(self, mock_run):
+        gh = GitHubIssues("user/repo", allowed_authors=["trusted"])
+        issue_data = {
+            "number": 42, "title": "Injected", "labels": [],
+            "state": "OPEN", "author": {"login": "attacker"},
+        }
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps(issue_data), returncode=0
+        )
+        assert gh.get_issue(42) is None
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_get_issue_allows_authorized(self, mock_run):
+        gh = GitHubIssues("user/repo", allowed_authors=["trusted"])
+        issue_data = {
+            "number": 42, "title": "Legit", "labels": [],
+            "state": "OPEN", "author": {"login": "trusted"},
+        }
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps(issue_data), returncode=0
+        )
+        result = gh.get_issue(42)
+        assert result is not None
+        assert result["number"] == 42

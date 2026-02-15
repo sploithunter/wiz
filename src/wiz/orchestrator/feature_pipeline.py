@@ -35,7 +35,10 @@ class FeatureCyclePipeline:
         state = CycleState(repo=repo.name)
         start = time.time()
 
-        github = GitHubIssues(repo.github)
+        github = GitHubIssues(
+            repo.github,
+            allowed_authors=repo.allowed_issue_authors or None,
+        )
         worktree = WorktreeManager(
             Path(repo.path), self.config.worktrees.base_dir,
         )

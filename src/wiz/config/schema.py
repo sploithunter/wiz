@@ -19,6 +19,7 @@ class RepoConfig(BaseModel):
     github: str
     enabled: bool = True
     self_improve: bool = False
+    allowed_issue_authors: list[str] = Field(default_factory=list)
 
 
 class BugHunterConfig(BaseModel):

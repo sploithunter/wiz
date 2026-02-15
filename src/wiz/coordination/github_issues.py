@@ -13,9 +13,14 @@ logger = logging.getLogger(__name__)
 class GitHubIssues:
     """Manage GitHub issues via the gh CLI."""
 
-    def __init__(self, repo: str) -> None:
+    def __init__(
+        self, repo: str, allowed_authors: list[str] | None = None,
+    ) -> None:
         self.repo = repo
         self._ensured_labels: set[str] = set()
+        self._allowed_authors: set[str] | None = (
+            {a.lower() for a in allowed_authors} if allowed_authors else None
+        )
 
     def _run_gh(
         self, args: list[str], check: bool = True,
@@ -68,28 +73,70 @@ class GitHubIssues:
         state: str = "open",
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """List issues with optional label and state filter."""
+        """List issues with optional label and state filter.
+
+        When allowed_authors is configured, issues from non-allowed authors
+        are filtered out procedurally BEFORE returning, so their content
+        never reaches agent prompts.
+        """
         args = ["issue", "list", "--state", state, "--limit", str(limit), "--json",
-                "number,title,labels,state,url,body"]
+                "number,title,labels,state,url,body,author"]
         if labels:
             for label in labels:
                 args.extend(["--label", label])
         try:
             result = self._run_gh(args)
-            return json.loads(result.stdout) if result.stdout.strip() else []
+            issues = json.loads(result.stdout) if result.stdout.strip() else []
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
             return []
 
+        return self._filter_by_author(issues)
+
+    def _filter_by_author(self, issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Procedurally filter issues to only those from allowed authors.
+
+        This is a security boundary: it runs in Python code before issue
+        content (title, body) ever reaches an agent prompt, preventing
+        prompt injection via malicious GitHub issues.
+
+        When allowed_authors is None (empty config), all issues pass through.
+        """
+        if not self._allowed_authors:
+            return issues
+
+        allowed: list[dict[str, Any]] = []
+        for issue in issues:
+            author = issue.get("author", {})
+            login = (author.get("login") or "").lower()
+            number = issue.get("number", "?")
+            if login in self._allowed_authors:
+                allowed.append(issue)
+            else:
+                logger.warning(
+                    "Issue #%s rejected: author '%s' not in allowed list",
+                    number, login,
+                )
+        return allowed
+
     def get_issue(self, issue_number: int) -> dict[str, Any] | None:
-        """Get a single issue by number. Returns dict or None."""
+        """Get a single issue by number. Returns dict or None.
+
+        Rejects issues from non-allowed authors when allowlist is configured.
+        """
         try:
             result = self._run_gh(
                 ["issue", "view", str(issue_number), "--json",
-                 "number,title,labels,state,url,body"]
+                 "number,title,labels,state,url,body,author"]
             )
-            return json.loads(result.stdout) if result.stdout.strip() else None
+            issue = json.loads(result.stdout) if result.stdout.strip() else None
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError):
             return None
+
+        if issue is None:
+            return None
+
+        filtered = self._filter_by_author([issue])
+        return filtered[0] if filtered else None
 
     def add_comment(self, issue_number: int, body: str) -> bool:
         """Add a comment to an issue."""

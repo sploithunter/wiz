@@ -53,7 +53,10 @@ class DevCyclePipeline:
         phases = phases or self.config.dev_cycle.phases
 
         # Shared resources
-        github = GitHubIssues(repo.github)
+        github = GitHubIssues(
+            repo.github,
+            allowed_authors=repo.allowed_issue_authors or None,
+        )
         prs = GitHubPRs(repo.github)
         worktree = WorktreeManager(Path(repo.path), self.config.worktrees.base_dir)
         locks = FileLockManager(

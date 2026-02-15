@@ -17,21 +17,30 @@ repos:
     github: "sploithunter/wiz"
     enabled: true
     self_improve: true
+    allowed_issue_authors:  # Only these GitHub users can create issues agents will process
+      - "sploithunter"
 
   - name: "harness-bench"
     path: "/Users/jason/Documents/harness-bench"
     github: "sploithunter/harnesss-bench"
     enabled: true
+    allowed_issue_authors:
+      - "sploithunter"
 
   - name: "coding-agent-bridge"
     path: "/Users/jason/Documents/coding-agent-bridge"
     github: "sploithunter/coding-agent-bridge"
     enabled: true
+    allowed_issue_authors:
+      - "sploithunter"
+      - "jasonjmcghee"
 
   - name: "solar"
     path: "/Users/jason/Documents/solar"
     github: "sploithunter/solar"
     enabled: true
+    allowed_issue_authors:
+      - "sploithunter"
 
 # --- Agents ---
 agents:
