@@ -12,6 +12,7 @@ from wiz.agents.base import BaseAgent
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import SocialManagerConfig
+from wiz.integrations.google_docs import GoogleDocsClient
 from wiz.integrations.image_prompts import save_all_image_prompts
 from wiz.integrations.typefully import DraftResult, TypefullyClient
 from wiz.memory.long_term import LongTermMemory
@@ -33,11 +34,13 @@ class SocialManagerAgent(BaseAgent):
         config: SocialManagerConfig,
         memory: LongTermMemory | None = None,
         typefully: TypefullyClient | None = None,
+        google_docs: GoogleDocsClient | None = None,
     ) -> None:
         super().__init__(runner, config)
         self.social_config = config
         self.memory = memory
         self.typefully = typefully or TypefullyClient.from_config(config)
+        self.google_docs = google_docs
 
     def build_prompt(self, **kwargs: Any) -> str:
         if self.social_config.social_posts_per_week == 0:
@@ -144,10 +147,28 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             created = sum(1 for dr in draft_results if dr.success)
             logger.info("Created %d/%d Typefully drafts", created, len(draft_results))
 
-        # Save image prompts to files (separate from Typefully)
-        image_prompt_paths = save_all_image_prompts(drafts_parsed, source="social")
-        if image_prompt_paths:
-            logger.info("Saved %d image prompts", len(image_prompt_paths))
+        # Create companion Google Docs per draft (posts + image prompt)
+        doc_urls: list[str] = []
+        if drafts_parsed and self.google_docs and self.google_docs.enabled:
+            for draft in drafts_parsed:
+                title = draft.get("draft_title", "Social Draft")
+                posts = draft.get("posts", [])
+                body = "\n\n".join(p.get("text", "") for p in posts)
+                image_prompt = draft.get("image_prompt", "").strip() or None
+                doc_result = self.google_docs.create_document(
+                    title=title, body=body, image_prompt=image_prompt
+                )
+                if doc_result.success and doc_result.url:
+                    doc_urls.append(doc_result.url)
+            if doc_urls:
+                logger.info("Created %d social Google Docs", len(doc_urls))
+
+        # Fall back to disk-based image prompts when Google Docs is disabled
+        image_prompt_paths: list[Path] = []
+        if not (self.google_docs and self.google_docs.enabled):
+            image_prompt_paths = save_all_image_prompts(drafts_parsed, source="social")
+            if image_prompt_paths:
+                logger.info("Saved %d image prompts", len(image_prompt_paths))
 
         if result.success and self.memory:
             self.memory.update_topic(
@@ -160,6 +181,7 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             "drafts_parsed": len(drafts_parsed),
             "drafts_created": sum(1 for dr in draft_results if dr.success),
             "image_prompts_saved": len(image_prompt_paths),
+            "doc_urls": doc_urls,
         }
 
 

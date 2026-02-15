@@ -172,3 +172,10 @@ telegram:
   enabled: false
   bot_token: ""
   chat_id: ""
+
+# --- Google Docs ---
+google_docs:
+  enabled: false
+  credentials_file: "~/.wiz/google-credentials.json"
+  token_file: "~/.wiz/google-token.json"
+  folder_id: ""  # Google Drive folder ID to move docs into

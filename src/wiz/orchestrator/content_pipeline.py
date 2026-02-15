@@ -12,6 +12,7 @@ from wiz.bridge.client import BridgeClient
 from wiz.bridge.monitor import BridgeEventMonitor
 from wiz.bridge.runner import SessionRunner
 from wiz.config.schema import WizConfig
+from wiz.integrations.google_docs import GoogleDocsClient
 from wiz.integrations.typefully import TypefullyClient
 from wiz.memory.long_term import LongTermMemory
 from wiz.orchestrator.state import CycleState
@@ -35,13 +36,14 @@ class ContentCyclePipeline:
         start = time.time()
         memory = LongTermMemory(Path(self.config.memory.long_term_dir))
         memory.load_index()
+        google_docs = GoogleDocsClient.from_config(self.config.google_docs)
 
         # Blog Writer
         try:
             logger.info("=== content: blog_write ===")
             phase_start = time.time()
             runner = self._create_runner()
-            blog = BlogWriterAgent(runner, self.config.agents.blog_writer, memory)
+            blog = BlogWriterAgent(runner, self.config.agents.blog_writer, memory, google_docs)
             result = blog.run(".", timeout=self.config.agents.blog_writer.session_timeout)
             logger.info("=== content: blog_write completed (%.1fs) ===", time.time() - phase_start)
             state.add_phase("blog_write", result.get("success", False), result)
@@ -55,7 +57,9 @@ class ContentCyclePipeline:
             phase_start = time.time()
             runner = self._create_runner()
             typefully = TypefullyClient.from_config(self.config.agents.social_manager)
-            social = SocialManagerAgent(runner, self.config.agents.social_manager, memory, typefully)
+            social = SocialManagerAgent(
+                runner, self.config.agents.social_manager, memory, typefully, google_docs
+            )
             result = social.run(".", timeout=self.config.agents.social_manager.session_timeout)
             logger.info("=== content: social_manage completed (%.1fs) ===", time.time() - phase_start)
             state.add_phase("social_manage", result.get("success", False), result)

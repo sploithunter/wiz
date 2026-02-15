@@ -146,6 +146,13 @@ class TelegramConfig(BaseModel):
     chat_id: str = ""
 
 
+class GoogleDocsConfig(BaseModel):
+    enabled: bool = False
+    credentials_file: str = "~/.wiz/google-credentials.json"
+    token_file: str = "~/.wiz/google-token.json"
+    folder_id: str = ""
+
+
 class WizConfig(BaseModel):
     """Root configuration model for Wiz."""
 
@@ -160,5 +167,6 @@ class WizConfig(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     testing: TestingConfig = Field(default_factory=TestingConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    google_docs: GoogleDocsConfig = Field(default_factory=GoogleDocsConfig)
 
     model_config = {"populate_by_name": True}

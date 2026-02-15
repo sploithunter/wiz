@@ -134,6 +134,20 @@ def run_feature_cycle(ctx: click.Context, repo: str | None) -> None:
         click.echo(state.summary())
 
 
+@main.command("google-auth")
+@click.pass_context
+def google_auth(ctx: click.Context) -> None:
+    """Authorize Google Docs access (one-time browser flow)."""
+    from wiz.config.loader import load_config
+    from wiz.integrations.google_docs import GoogleDocsClient
+
+    config = load_config(ctx.obj["config_path"])
+    if GoogleDocsClient.authorize(config.google_docs):
+        click.echo("Google Docs authorization successful.")
+    else:
+        click.echo("Google Docs authorization failed. Check credentials file path.")
+
+
 @main.command()
 @click.pass_context
 def status(ctx: click.Context) -> None:

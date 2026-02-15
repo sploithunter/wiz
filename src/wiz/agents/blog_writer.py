@@ -10,6 +10,7 @@ from wiz.agents.base import BaseAgent
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import BlogWriterConfig
+from wiz.integrations.google_docs import GoogleDocsClient
 from wiz.integrations.image_prompts import save_all_image_prompts
 from wiz.memory.long_term import LongTermMemory
 
@@ -27,10 +28,12 @@ class BlogWriterAgent(BaseAgent):
         runner: SessionRunner,
         config: BlogWriterConfig,
         memory: LongTermMemory | None = None,
+        google_docs: GoogleDocsClient | None = None,
     ) -> None:
         super().__init__(runner, config)
         self.blog_config = config
         self.memory = memory
+        self.google_docs = google_docs
 
     def build_prompt(self, **kwargs: Any) -> str:
         mode = kwargs.get("mode", "propose")
@@ -92,13 +95,37 @@ Use markdown format with frontmatter (title, date, tags).
         full_text = "\n".join(text_chunks)
 
         blocks = _extract_json_blocks(full_text)
-        image_prompt_paths = save_all_image_prompts(blocks, source="blog")
-        if image_prompt_paths:
-            logger.info("Saved %d blog image prompts", len(image_prompt_paths))
+
+        # Create Google Doc if enabled
+        doc_url = None
+        if self.google_docs and self.google_docs.enabled and full_text.strip():
+            title = kwargs.get("topic") or "Blog Draft"
+            image_prompt = ""
+            for block in blocks:
+                ip = block.get("image_prompt", "").strip()
+                if ip:
+                    image_prompt = ip
+                    break
+            doc_result = self.google_docs.create_document(
+                title=title,
+                body=full_text,
+                image_prompt=image_prompt or None,
+            )
+            if doc_result.success:
+                doc_url = doc_result.url
+                logger.info("Created blog Google Doc: %s", doc_url)
+
+        # Fall back to disk-based image prompts when Google Docs is disabled
+        image_prompt_paths: list[Path] = []
+        if not (self.google_docs and self.google_docs.enabled):
+            image_prompt_paths = save_all_image_prompts(blocks, source="blog")
+            if image_prompt_paths:
+                logger.info("Saved %d blog image prompts", len(image_prompt_paths))
 
         return {
             "success": True,
             "mode": kwargs.get("mode"),
             "reason": result.reason,
             "image_prompts_saved": len(image_prompt_paths),
+            "doc_url": doc_url,
         }

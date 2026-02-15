@@ -145,6 +145,49 @@ class TestSocialManagerAgent:
         assert result["image_prompts_saved"] == 1
         mock_save.assert_called_once()
 
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_creates_google_docs(self, _mock_img):
+        from wiz.integrations.google_docs import DocResult, GoogleDocsClient
+
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = False
+
+        gdocs = MagicMock(spec=GoogleDocsClient)
+        gdocs.enabled = True
+        gdocs.create_document.return_value = DocResult(
+            success=True, doc_id="sd1", url="https://docs.google.com/document/d/sd1/edit"
+        )
+
+        config = SocialManagerConfig()
+        agent, runner, _ = self._make_agent(config, typefully=typefully)
+        agent.google_docs = gdocs
+
+        json_output = '```json\n{"draft_title": "Test", "posts": [{"text": "hi"}], "image_prompt": "A robot"}\n```'
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": json_output}}],
+        )
+
+        result = agent.run("/tmp")
+        assert len(result["doc_urls"]) == 1
+        gdocs.create_document.assert_called_once()
+        # Disk-based image prompts skipped when Google Docs enabled
+        assert result["image_prompts_saved"] == 0
+
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_no_google_docs_when_disabled(self, _mock_img):
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = False
+
+        agent, runner, _ = self._make_agent(typefully=typefully)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed", events=[]
+        )
+
+        result = agent.run("/tmp")
+        assert result["doc_urls"] == []
+
 
 class TestExtractJsonBlocks:
     def test_single_block(self):

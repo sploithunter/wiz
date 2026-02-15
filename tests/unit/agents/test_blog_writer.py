@@ -36,8 +36,7 @@ class TestBlogWriterAgent:
         assert "Recent Topics" in prompt
         memory.retrieve.assert_called()
 
-    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
-    def test_process_result_updates_memory(self, _mock_img):
+    def test_process_result_updates_memory(self):
         agent, _, memory = self._make_agent(with_memory=True)
         result = SessionResult(success=True, reason="completed")
         agent.process_result(result, topic="Test Topic", mode="write")
@@ -64,9 +63,36 @@ class TestBlogWriterAgent:
         assert output["image_prompts_saved"] == 1
         mock_save.assert_called_once()
 
-    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
-    def test_process_result_no_image_prompt(self, mock_save):
+    def test_process_result_no_image_prompt(self):
         agent, _, _ = self._make_agent()
         result = SessionResult(success=True, reason="completed", events=[])
         output = agent.process_result(result, mode="write")
         assert output["image_prompts_saved"] == 0
+
+    def test_process_result_creates_google_doc(self):
+        from wiz.integrations.google_docs import DocResult, GoogleDocsClient
+
+        gdocs = MagicMock(spec=GoogleDocsClient)
+        gdocs.enabled = True
+        gdocs.create_document.return_value = DocResult(
+            success=True, doc_id="d1", url="https://docs.google.com/document/d/d1/edit"
+        )
+
+        agent, _, _ = self._make_agent()
+        agent.google_docs = gdocs
+        result = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": "Some blog content"}}],
+        )
+        output = agent.process_result(result, mode="write", topic="My Topic")
+        assert output["doc_url"] == "https://docs.google.com/document/d/d1/edit"
+        gdocs.create_document.assert_called_once()
+        # Disk-based image prompts should be skipped when Google Docs is enabled
+        assert output["image_prompts_saved"] == 0
+
+    def test_process_result_no_google_doc_when_disabled(self):
+        agent, _, _ = self._make_agent()
+        result = SessionResult(success=True, reason="completed", events=[])
+        output = agent.process_result(result, mode="write")
+        assert output["doc_url"] is None
