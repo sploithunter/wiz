@@ -1,7 +1,7 @@
 """Tests for reviewer agent."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from wiz.agents.reviewer import ReviewerAgent
 from wiz.bridge.runner import SessionRunner
@@ -16,7 +16,7 @@ from wiz.notifications.telegram import TelegramNotifier
 
 
 class TestReviewerAgent:
-    def _make_agent(self, tmp_path: Path, config: ReviewerConfig | None = None):
+    def _make_agent(self, tmp_path: Path, config: ReviewerConfig | None = None, self_improve: bool = False):
         runner = MagicMock(spec=SessionRunner)
         config = config or ReviewerConfig()
         github = MagicMock(spec=GitHubIssues)
@@ -25,7 +25,8 @@ class TestReviewerAgent:
         loop_tracker = LoopTracker(strikes, max_cycles=config.max_review_cycles)
         notifier = MagicMock(spec=TelegramNotifier)
         return ReviewerAgent(
-            runner, config, github, prs, loop_tracker, notifier, repo_name="test/repo"
+            runner, config, github, prs, loop_tracker, notifier,
+            repo_name="test/repo", self_improve=self_improve,
         ), runner, github, prs, notifier
 
     def test_approval_path(self, tmp_path: Path):
@@ -149,3 +150,183 @@ class TestReviewerAgent:
         issues = [{"number": 7, "title": "Bug", "body": "x"}]
         agent.run("/tmp", issues=issues)
         dlocks.release.assert_called_once_with(7)
+
+
+class TestCheckApproval:
+    """Tests for improved approval parsing."""
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(runner, config, github, prs, loop_tracker, notifier)
+
+    def test_json_verdict_approved(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"message": '```json\n{"verdict": "approved", "reason": "looks good"}\n```'}}],
+        )
+        assert agent._check_approval(result) is True
+
+    def test_json_verdict_rejected(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"message": '```json\n{"verdict": "rejected", "reason": "needs tests"}\n```'}}],
+        )
+        assert agent._check_approval(result) is False
+
+    def test_keyword_approved_in_response(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"response": "After thorough review: APPROVED"}}],
+        )
+        assert agent._check_approval(result) is True
+
+    def test_keyword_rejected_in_response(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"response": "REJECTED - needs more work"}}],
+        )
+        assert agent._check_approval(result) is False
+
+    def test_keyword_in_text_field(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="done",
+            events=[{"text": "Review complete: APPROVED"}],
+        )
+        assert agent._check_approval(result) is True
+
+    def test_keyword_in_reason_fallback(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="APPROVED after review",
+            events=[],
+        )
+        assert agent._check_approval(result) is True
+
+    def test_json_verdict_takes_priority_over_keywords(self, tmp_path):
+        """JSON verdict should win even if keywords say otherwise."""
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"message": 'The fix was APPROVED but ```json\n{"verdict": "rejected"}\n```'}}],
+        )
+        assert agent._check_approval(result) is False
+
+    def test_fallback_to_result_success(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(success=True, reason="done", events=[])
+        assert agent._check_approval(result) is True
+
+    def test_fallback_to_result_failure(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(success=False, reason="timeout", events=[])
+        assert agent._check_approval(result) is False
+
+
+class TestParseJsonVerdict:
+    def test_approved(self):
+        assert ReviewerAgent._parse_json_verdict('```json\n{"verdict": "approved"}\n```') is True
+
+    def test_rejected(self):
+        assert ReviewerAgent._parse_json_verdict('```json\n{"verdict": "rejected"}\n```') is False
+
+    def test_pass_variant(self):
+        assert ReviewerAgent._parse_json_verdict('```json\n{"verdict": "pass"}\n```') is True
+
+    def test_fail_variant(self):
+        assert ReviewerAgent._parse_json_verdict('```json\n{"verdict": "fail"}\n```') is False
+
+    def test_no_json(self):
+        assert ReviewerAgent._parse_json_verdict("plain text with no JSON") is None
+
+    def test_json_without_verdict(self):
+        assert ReviewerAgent._parse_json_verdict('```json\n{"status": "ok"}\n```') is None
+
+    def test_invalid_json(self):
+        assert ReviewerAgent._parse_json_verdict('```json\n{bad json}\n```') is None
+
+
+class TestKeywordVerdict:
+    def test_approved(self):
+        assert ReviewerAgent._keyword_verdict("The fix is APPROVED") is True
+
+    def test_rejected(self):
+        assert ReviewerAgent._keyword_verdict("REJECTED: needs work") is False
+
+    def test_rejected_takes_priority(self):
+        assert ReviewerAgent._keyword_verdict("APPROVED but then REJECTED") is False
+
+    def test_no_keywords(self):
+        assert ReviewerAgent._keyword_verdict("The fix looks reasonable") is None
+
+    def test_empty(self):
+        assert ReviewerAgent._keyword_verdict("") is None
+
+
+class TestSelfImprovementGuard:
+    def _make_agent(self, tmp_path, self_improve=True):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+            repo_name="test/repo", self_improve=self_improve,
+        ), runner, github, prs, notifier
+
+    @patch.object(ReviewerAgent, "_get_branch_files")
+    def test_protected_files_trigger_human_review(self, mock_files, tmp_path):
+        agent, runner, github, prs, notifier = self._make_agent(tmp_path, self_improve=True)
+        runner.run.return_value = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "https://github.com/test/repo/pull/1"
+        mock_files.return_value = ["src/wiz/config/schema.py", "src/wiz/agents/foo.py"]
+
+        issues = [{"number": 1, "title": "Bug fix", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["needs_human_review"] is True
+        github.update_labels.assert_any_call(1, add=["requires-human-review"])
+        notifier.notify_escalation.assert_called_once()
+        # Issue should NOT be closed when human review needed
+        github.close_issue.assert_not_called()
+
+    @patch.object(ReviewerAgent, "_get_branch_files")
+    def test_no_protected_files_auto_closes(self, mock_files, tmp_path):
+        agent, runner, github, prs, notifier = self._make_agent(tmp_path, self_improve=True)
+        runner.run.return_value = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "https://github.com/test/repo/pull/1"
+        mock_files.return_value = ["src/wiz/agents/foo.py", "tests/test_foo.py"]
+
+        issues = [{"number": 1, "title": "Bug fix", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["needs_human_review"] is False
+        github.close_issue.assert_called_once_with(1)
+        notifier.notify_escalation.assert_not_called()
+
+    def test_guard_not_created_when_self_improve_false(self, tmp_path):
+        agent, _, _, _, _ = self._make_agent(tmp_path, self_improve=False)
+        assert agent.guard is None
+
+    def test_guard_created_when_self_improve_true(self, tmp_path):
+        agent, _, _, _, _ = self._make_agent(tmp_path, self_improve=True)
+        assert agent.guard is not None

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,7 @@ from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.github_prs import GitHubPRs
 from wiz.coordination.loop_tracker import LoopTracker
 from wiz.notifications.telegram import TelegramNotifier
+from wiz.orchestrator.self_improve import SelfImprovementGuard
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,7 @@ class ReviewerAgent(BaseAgent):
         notifier: TelegramNotifier,
         repo_name: str = "",
         distributed_locks: DistributedLockManager | None = None,
+        self_improve: bool = False,
     ) -> None:
         super().__init__(runner, config)
         self.reviewer_config = config
@@ -44,6 +49,8 @@ class ReviewerAgent(BaseAgent):
         self.notifier = notifier
         self.repo_name = repo_name
         self.distributed_locks = distributed_locks
+        self.self_improve = self_improve
+        self.guard = SelfImprovementGuard() if self_improve else None
 
     def build_prompt(self, **kwargs: Any) -> str:
         """Build review prompt for a specific issue."""
@@ -141,8 +148,35 @@ If the fix is inadequate:
                         body=f"Fixes #{number}\n\nReviewed and approved by Wiz Reviewer.",
                         head=branch,
                     )
-                    self.github.close_issue(number)
-                    results.append({"issue": number, "action": "approved", "pr": pr_url})
+
+                    # Check self-improvement guard for protected files
+                    needs_human = False
+                    if self.guard and pr_url:
+                        changed_files = self._get_branch_files(branch)
+                        guard_result = self.guard.validate_changes(changed_files)
+                        if guard_result["needs_human_review"]:
+                            needs_human = True
+                            self.github.update_labels(
+                                number, add=["requires-human-review"],
+                            )
+                            self.notifier.notify_escalation(
+                                self.repo_name,
+                                f"#{number}: {issue.get('title', '')}",
+                                f"Protected files changed: {', '.join(guard_result['protected_files'])}",
+                            )
+                            logger.info(
+                                "Issue #%d: PR created but requires human review (protected files)",
+                                number,
+                            )
+
+                    if not needs_human:
+                        self.github.close_issue(number)
+                    results.append({
+                        "issue": number,
+                        "action": "approved",
+                        "pr": pr_url,
+                        "needs_human_review": needs_human,
+                    })
                 else:
                     # Reject: send back with feedback
                     cycle = self.loop_tracker.record_cycle(number, "Review rejected")
@@ -164,17 +198,100 @@ If the fix is inadequate:
         return {"reviews": len(results), "results": results}
 
     def _check_approval(self, result: SessionResult) -> bool:
-        """Check if the review approved the fix. Simplified heuristic."""
-        # In real implementation, parse agent output for APPROVED/REJECTED
-        # For now, assume approved if session completed successfully
+        """Check if the review approved the fix.
+
+        Strategy (in priority order):
+        1. Look for structured JSON verdict: {"verdict": "approved"/"rejected"}
+        2. Keyword scan: standalone APPROVED/REJECTED in output
+        3. Fall back to result.success
+        """
+        all_text = self._collect_event_text(result)
+
+        # 1. Try structured JSON verdict
+        verdict = self._parse_json_verdict(all_text)
+        if verdict is not None:
+            return verdict
+
+        # 2. Keyword scan on events (more targeted than full text)
         for event in result.events:
             data = event.get("data", {})
             response = data.get("response", "")
-            if "APPROVED" in response.upper():
-                return True
-            if "REJECTED" in response.upper():
-                return False
+            text = event.get("text", "")
+            for chunk in (response, text):
+                kw = self._keyword_verdict(chunk)
+                if kw is not None:
+                    return kw
+
+        # 3. Keyword scan on full collected text
+        kw = self._keyword_verdict(all_text)
+        if kw is not None:
+            return kw
+
+        # 4. Fallback
         return result.success
+
+    @staticmethod
+    def _collect_event_text(result: SessionResult) -> str:
+        """Collect all text from result events and reason."""
+        chunks: list[str] = []
+        for event in result.events:
+            data = event.get("data", {})
+            for key in ("response", "message"):
+                val = data.get(key, "")
+                if val:
+                    chunks.append(val)
+            text = event.get("text", "")
+            if text:
+                chunks.append(text)
+        if result.reason:
+            chunks.append(result.reason)
+        return "\n".join(chunks)
+
+    @staticmethod
+    def _parse_json_verdict(text: str) -> bool | None:
+        """Extract verdict from JSON blocks like ```json{"verdict":"approved"}```."""
+        pattern = r"```json\s*(\{.*?\})\s*```"
+        for match in re.finditer(pattern, text, re.DOTALL):
+            try:
+                obj = json.loads(match.group(1))
+                if isinstance(obj, dict) and "verdict" in obj:
+                    v = obj["verdict"].lower().strip()
+                    if v in ("approved", "approve", "pass"):
+                        return True
+                    if v in ("rejected", "reject", "fail"):
+                        return False
+            except (json.JSONDecodeError, AttributeError):
+                continue
+        return None
+
+    @staticmethod
+    def _keyword_verdict(text: str) -> bool | None:
+        """Scan for standalone APPROVED/REJECTED keywords.
+
+        Uses word boundaries to avoid false positives like
+        'the fix was not APPROVED by the standards'.
+        """
+        if not text:
+            return None
+        upper = text.upper()
+        # Look for REJECTED first (explicit rejection takes priority)
+        if re.search(r"\bREJECTED\b", upper):
+            return False
+        if re.search(r"\bAPPROVED\b", upper):
+            return True
+        return None
+
+    def _get_branch_files(self, branch: str) -> list[str]:
+        """Get list of files changed in the branch vs main."""
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", f"main...{branch}"],
+                capture_output=True, text=True, check=True, timeout=10,
+            )
+            return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            logger.debug("Could not get branch files for %s", branch)
+            return []
 
     def _escalate(self, issue_number: int, title: str) -> None:
         """Escalate an issue to human review."""

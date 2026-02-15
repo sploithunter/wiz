@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,22 @@ CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "bug-fi
 
 # Priority ordering for issues
 PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4"]
+
+
+def _check_files_changed(work_dir: str) -> bool:
+    """Check if any files were actually changed in the worktree via git."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--stat", "HEAD"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return bool(result.stdout.strip())
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        logger.debug("Could not check git diff in %s", work_dir)
+        return False
 
 
 def _extract_priority(issue: dict) -> int:
@@ -159,7 +176,8 @@ class BugFixerAgent(BaseAgent):
                 )
 
                 if result.success:
-                    if stagnation.check(files_changed=result.success):
+                    files_changed = _check_files_changed(work_dir)
+                    if stagnation.check(files_changed=files_changed):
                         logger.warning("Issue #%d: stagnation detected", number)
                         self.github.add_comment(
                             number, "Fix stalled: no progress after multiple attempts"
