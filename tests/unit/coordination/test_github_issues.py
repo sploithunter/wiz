@@ -285,3 +285,34 @@ class TestGhMissing:
         mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
         # Should not raise
         self.gh.ensure_labels(["bug", "wiz"])
+
+
+class TestGetComments:
+    def setup_method(self):
+        self.gh = GitHubIssues("user/repo")
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_returns_last_n_comments(self, mock_run):
+        comments = [
+            {"body": "comment 1"},
+            {"body": "comment 2"},
+            {"body": "**Review: REJECTED**\n\nNeeds tests"},
+        ]
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps({"comments": comments}), returncode=0,
+        )
+        result = self.gh.get_comments(42, last_n=2)
+        assert len(result) == 2
+        assert "REJECTED" in result[-1]["body"]
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_returns_empty_on_error(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+        assert self.gh.get_comments(42) == []
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_returns_empty_when_no_comments(self, mock_run):
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps({"comments": []}), returncode=0,
+        )
+        assert self.gh.get_comments(42) == []

@@ -185,6 +185,20 @@ class GitHubIssues:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
+    def get_comments(self, issue_number: int, last_n: int = 5) -> list[dict[str, Any]]:
+        """Get the last N comments on an issue."""
+        args = [
+            "issue", "view", str(issue_number),
+            "--json", "comments",
+        ]
+        try:
+            result = self._run_gh(args)
+            data = json.loads(result.stdout) if result.stdout.strip() else {}
+            comments = data.get("comments", [])
+            return comments[-last_n:] if comments else []
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+            return []
+
     def check_duplicate(self, title: str) -> bool:
         """Check if an issue with similar title exists."""
         issues = self.list_issues()

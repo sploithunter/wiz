@@ -37,6 +37,7 @@ Body must include:
 - Check existing issues before creating duplicates
 - Every bug MUST have a proof-of-concept
 - Run `pytest tests/ -v` before and after to understand the current test state — do NOT create issues for bugs that are already caught by existing tests
+- **If you find failing tests during your analysis, create an issue for each one.** Broken tests are bugs and must be tracked and fixed. Never label them as "pre-existing" and move on.
 - Do NOT report style issues, naming conventions, or personal preferences
 - Focus on bugs that affect correctness, security, or reliability
 - Respect the max_issues_per_run limit

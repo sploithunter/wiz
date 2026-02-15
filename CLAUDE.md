@@ -36,6 +36,8 @@ ruff check src/
 ## Testing
 - All changes must include tests
 - Run `pytest tests/` before committing — **never commit with failing tests**
+- **ZERO TOLERANCE for broken tests**: If ANY test fails — including tests that were already broken before your changes — you MUST fix them before committing. "Pre-existing failure" is not an excuse to skip a broken test. Every commit must leave the test suite at 0 failures.
+- **Never use `--no-verify`** to bypass pre-commit hooks or linter checks
 - Integration tests are marked `@pytest.mark.integration`
 - E2E tests are marked `@pytest.mark.e2e`
 
