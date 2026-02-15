@@ -161,7 +161,16 @@ class BugFixerAgent(BaseAgent):
                     return {"issue": number, "stalled": True}
                 else:
                     if self.worktree:
-                        self.worktree.push("fix", number)
+                        pushed = self.worktree.push("fix", number)
+                        if not pushed:
+                            logger.error(
+                                "Issue #%d: push failed for fix/%d", number, number
+                            )
+                            self.github.add_comment(
+                                number,
+                                "Fix applied locally but push failed — retaining labels for retry",
+                            )
+                            return {"issue": number, "failed": True, "reason": "push-failed"}
                     logger.info("Issue #%d: fix applied, pushed to fix/%d", number, number)
                     self.github.add_comment(number, "Fix applied, ready for review")
                     self.github.update_labels(

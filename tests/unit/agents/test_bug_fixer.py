@@ -136,6 +136,45 @@ class TestBugFixerAgent:
             agent.run("/tmp", issues=issues)
         locks.release.assert_called_once_with("issue-1", "bug-fixer")
 
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_push_failure_blocks_label_advance(self, _mock_check):
+        """Labels must NOT advance to needs-review when worktree push fails (issue #31)."""
+        agent, runner, github, wt, locks = self._make_agent()
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        wt.push.return_value = False  # push fails
+
+        issues = [{"number": 101, "title": "[P2] Bug", "body": "details"}]
+        result = agent.run("/tmp", issues=issues)
+
+        # Should report failure, not success
+        assert result["results"][0]["failed"] is True
+        assert result["results"][0]["reason"] == "push-failed"
+        assert result["results"][0].get("fixed") is None
+
+        # Labels must NOT be updated to needs-review
+        github.update_labels.assert_not_called()
+
+        # Should still comment about the push failure
+        github.add_comment.assert_called_once_with(
+            101,
+            "Fix applied locally but push failed — retaining labels for retry",
+        )
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_push_success_advances_labels(self, _mock_check):
+        """Labels advance to needs-review only when push succeeds (issue #31)."""
+        agent, runner, github, wt, locks = self._make_agent()
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        wt.push.return_value = True  # push succeeds
+
+        issues = [{"number": 101, "title": "[P2] Bug", "body": "details"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["fixed"] is True
+        github.update_labels.assert_called_once_with(
+            101, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
+        )
+
     def test_distributed_lock_skipped_when_none(self):
         """No distributed_locks param means no distributed locking."""
         agent, runner, github, wt, locks = self._make_agent()
