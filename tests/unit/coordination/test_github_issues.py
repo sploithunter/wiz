@@ -149,6 +149,17 @@ class TestAuthorFiltering:
         ]
         assert len(gh._filter_by_author(issues)) == 0
 
+    def test_allowlist_handles_null_author(self):
+        """Regression: author=null (deleted/bot accounts) must not crash."""
+        gh = GitHubIssues("user/repo", allowed_authors=["alice"])
+        issues = [
+            {"number": 1, "title": "bug", "author": None},
+            {"number": 2, "title": "ok", "author": {"login": "alice"}},
+        ]
+        result = gh._filter_by_author(issues)
+        assert len(result) == 1
+        assert result[0]["number"] == 2
+
     def test_allowlist_blocks_empty_login(self):
         gh = GitHubIssues("user/repo", allowed_authors=["trusted"])
         issues = [
