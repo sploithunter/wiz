@@ -70,6 +70,20 @@ class TestFeatureProposerAgent:
         agent.run("/tmp")
         github.update_labels.assert_not_called()
 
+    def test_no_labels_update_when_push_fails(self):
+        """Regression test for #32: labels must not update when push fails."""
+        agent, runner, github, worktree, _ = self._make_agent()
+        approved_issue = [{"number": 5, "title": "Add caching", "body": "Details"}]
+        github.list_issues.side_effect = [approved_issue]
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        worktree.push.return_value = False
+
+        result = agent.run("/tmp")
+        worktree.push.assert_called_once_with("feature", 5)
+        github.update_labels.assert_not_called()
+        assert result["success"] is False
+        assert result["reason"] == "push_failed"
+
     def test_backlog_not_empty_awaits_approval(self):
         agent, runner, github, _, _ = self._make_agent()
         github.list_issues.side_effect = [
@@ -126,6 +140,25 @@ class TestRequireApproval:
             7, add=["feature-approved"], remove=["feature-candidate"],
         )
         worktree.create.assert_called_once_with("feature", 7)
+
+    def test_require_approval_false_no_labels_when_push_fails(self):
+        """Regression test for #32: auto-approved path must not label when push fails."""
+        agent, runner, github, worktree, _ = self._make_agent(require_approval=False)
+        candidate = [{"number": 7, "title": "Cool feature", "body": "Details", "url": "https://github.com/x/7"}]
+        github.list_issues.side_effect = [[], candidate]
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        worktree.push.return_value = False
+
+        result = agent.run("/tmp")
+        worktree.push.assert_called_once_with("feature", 7)
+        # Auto-approve label change should have happened, but NOT feature-implemented
+        implemented_calls = [
+            c for c in github.update_labels.call_args_list
+            if "feature-implemented" in c[1].get("add", [])
+        ]
+        assert len(implemented_calls) == 0
+        assert result["success"] is False
+        assert result["reason"] == "push_failed"
 
     def test_require_approval_false_labels_implemented_on_success(self):
         agent, runner, github, _, _ = self._make_agent(require_approval=False)
