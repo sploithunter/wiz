@@ -188,6 +188,15 @@ class TestSocialManagerAgent:
         result = agent.run("/tmp")
         assert result["doc_urls"] == []
 
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_model_passed_to_runner(self, _mock_img):
+        """Regression test for issue #53: model config must reach runner.run."""
+        config = SocialManagerConfig(model="custom-model")
+        agent, runner, _ = self._make_agent(config)
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        agent.run("/tmp")
+        assert runner.run.call_args[1]["model"] == "custom-model"
+
 
 class TestExtractJsonBlocks:
     def test_single_block(self):

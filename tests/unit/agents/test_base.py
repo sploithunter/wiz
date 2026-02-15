@@ -3,9 +3,16 @@
 from typing import Any
 from unittest.mock import MagicMock
 
+from pydantic import BaseModel, Field
+
 from wiz.agents.base import BaseAgent
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
+
+
+class _StubConfig(BaseModel):
+    model: str = "claude"
+    flags: list[str] = Field(default_factory=list)
 
 
 class ConcreteAgent(BaseAgent):
@@ -34,6 +41,7 @@ class TestBaseAgent:
             cwd="/tmp",
             prompt="Test prompt: find bugs",
             agent="claude",
+            model=None,
             timeout=60,
             flags=None,
         )
@@ -61,3 +69,24 @@ class TestBaseAgent:
         agent = ConcreteAgent(runner)
         result = agent.run("/tmp")
         assert result["success"] is False
+
+    def test_model_from_config_passed_to_runner(self):
+        """Config model is forwarded to runner.run (issue #53)."""
+        runner = MagicMock(spec=SessionRunner)
+        runner.run.return_value = SessionResult(success=True, reason="ok")
+
+        config = _StubConfig(model="custom-model")
+        agent = ConcreteAgent(runner, config)
+        agent.run("/tmp")
+
+        assert runner.run.call_args[1]["model"] == "custom-model"
+
+    def test_model_none_when_config_has_no_model(self):
+        """Without a config, model defaults to None (issue #53)."""
+        runner = MagicMock(spec=SessionRunner)
+        runner.run.return_value = SessionResult(success=True, reason="ok")
+
+        agent = ConcreteAgent(runner)
+        agent.run("/tmp")
+
+        assert runner.run.call_args[1]["model"] is None

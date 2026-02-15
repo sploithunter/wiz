@@ -310,3 +310,25 @@ class TestParallelFixes:
         ]
         result = agent.run("/tmp", issues=issues)
         assert result["issues_processed"] == 2
+
+
+class TestBugFixerModelPassthrough:
+    """Regression tests for issue #53: model config must reach runner.run."""
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_model_passed_to_runner(self, _mock_check):
+        config = BugFixerConfig(model="custom-model")
+        runner = MagicMock(spec=SessionRunner)
+        github = MagicMock(spec=GitHubIssues)
+        worktree = MagicMock(spec=WorktreeManager)
+        worktree.create.return_value = Path("/tmp/worktree")
+        locks = MagicMock(spec=FileLockManager)
+        locks.acquire.return_value = True
+
+        agent = BugFixerAgent(runner, config, github, worktree, locks)
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+
+        issues = [{"number": 1, "title": "[P2] Bug", "body": "details"}]
+        agent.run("/tmp", issues=issues)
+
+        assert runner.run.call_args[1]["model"] == "custom-model"

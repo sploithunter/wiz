@@ -136,7 +136,9 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             cwd=cwd,
             prompt=prompt,
             agent=self.agent_type,
+            model=self.social_config.model,
             timeout=timeout,
+            flags=self.social_config.flags or None,
         )
 
         # Parse Claude's JSON output and create Typefully drafts

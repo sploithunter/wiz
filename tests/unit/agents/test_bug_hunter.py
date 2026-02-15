@@ -88,3 +88,13 @@ class TestBugHunterAgent:
         assert "README" in prompt
         assert "docstrings" in prompt
         assert "schema.py" in prompt
+
+    def test_model_passed_to_runner(self):
+        """Regression test for issue #53: model config must reach runner.run."""
+        config = BugHunterConfig(model="custom-model")
+        agent, runner, github = self._make_agent(config)
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        github.list_issues.return_value = []
+
+        agent.run("/tmp")
+        assert runner.run.call_args[1]["model"] == "custom-model"

@@ -29,7 +29,8 @@ class TestReviewerAgent:
             repo_name="test/repo", self_improve=self_improve,
         ), runner, github, prs, notifier
 
-    def test_approval_path(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_approval_path(self, _mock_files, tmp_path: Path):
         """Approved fix -> PR created, issue closed."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         # Return result with APPROVED in events
@@ -146,7 +147,8 @@ class TestReviewerAgent:
         result = agent.run("/tmp", issues=issues)
         assert result["reviews"] == 2
 
-    def test_distributed_lock_skipped_when_none(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_distributed_lock_skipped_when_none(self, _mock_files, tmp_path: Path):
         """No distributed_locks means no distributed locking."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         assert agent.distributed_locks is None
@@ -517,3 +519,28 @@ class TestSelfImprovementGuard:
     def test_guard_created_when_self_improve_true(self, tmp_path):
         agent, _, _, _, _ = self._make_agent(tmp_path, self_improve=True)
         assert agent.guard is not None
+
+
+class TestReviewerModelPassthrough:
+    """Regression test for issue #53: model config must reach runner.run."""
+
+    def test_model_passed_to_runner(self, tmp_path):
+        config = ReviewerConfig(model="custom-model")
+        runner = MagicMock(spec=SessionRunner)
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        agent = ReviewerAgent(runner, config, github, prs, loop_tracker, notifier)
+
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "https://github.com/test/repo/pull/1"
+
+        issues = [{"number": 1, "title": "Bug", "body": "x"}]
+        agent.run("/tmp", issues=issues)
+
+        assert runner.run.call_args[1]["model"] == "custom-model"
