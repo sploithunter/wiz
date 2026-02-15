@@ -64,7 +64,24 @@ class TestFileLockManager:
         locks = FileLockManager(tmp_path, ttl=60)
         encoded = locks._encode_path("src/wiz/config/schema.py")
         assert "/" not in encoded
-        assert "--" in encoded
+        assert "\\" not in encoded
+
+    def test_path_encoding_no_collision(self, tmp_path: Path):
+        """Regression test for #23: 'a/b' and 'a--b' must not collide."""
+        locks = FileLockManager(tmp_path, ttl=60)
+        assert locks._encode_path("a/b") != locks._encode_path("a--b")
+
+    def test_acquire_no_collision_between_slash_and_double_dash(self, tmp_path: Path):
+        """Regression test for #23: independent keys must lock independently."""
+        locks = FileLockManager(tmp_path, ttl=60)
+        assert locks.acquire("a/b", "owner1") is True
+        assert locks.acquire("a--b", "owner2") is True
+        # Both locks are independent
+        assert locks.check("a/b")["owner"] == "owner1"
+        assert locks.check("a--b")["owner"] == "owner2"
+        # Releasing one does not affect the other
+        assert locks.release("a/b", "owner1") is True
+        assert locks.check("a--b") is not None
 
     def test_release_all(self, tmp_path: Path):
         locks = FileLockManager(tmp_path, ttl=60)
