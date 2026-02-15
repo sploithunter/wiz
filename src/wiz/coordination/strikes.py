@@ -23,6 +23,7 @@ class StrikeTracker:
             try:
                 self._data = json.loads(self.strike_file.read_text())
             except (json.JSONDecodeError, KeyError):
+                logger.warning("Corrupt strike file %s, resetting", self.strike_file)
                 self._data = {"issues": {}, "files": {}}
 
     def _save(self) -> None:
@@ -37,7 +38,9 @@ class StrikeTracker:
         self._data["issues"][key]["count"] += 1
         self._data["issues"][key]["history"].append(reason)
         self._save()
-        return self._data["issues"][key]["count"]
+        count = self._data["issues"][key]["count"]
+        logger.info("Issue #%s strike %d: %s", key, count, reason)
+        return count
 
     def get_issue_strikes(self, issue_number: int) -> int:
         """Get strike count for an issue."""
@@ -52,16 +55,25 @@ class StrikeTracker:
         if issue_number not in self._data["files"][file_path]["issues"]:
             self._data["files"][file_path]["issues"].append(issue_number)
         self._save()
-        return self._data["files"][file_path]["count"]
+        count = self._data["files"][file_path]["count"]
+        logger.info("File %s failure %d (issue #%d)", file_path, count, issue_number)
+        return count
 
     def is_escalated(self, issue_number: int, max_strikes: int = 3) -> bool:
         """Check if an issue has reached the escalation threshold."""
-        return self.get_issue_strikes(issue_number) >= max_strikes
+        strikes = self.get_issue_strikes(issue_number)
+        if strikes >= max_strikes:
+            logger.warning("Issue #%d escalated: %d strikes >= %d max", issue_number, strikes, max_strikes)
+            return True
+        return False
 
     def get_flagged_files(self, max_strikes: int = 3) -> list[str]:
         """Get files that have exceeded the failure threshold."""
-        return [
+        flagged = [
             fp
             for fp, data in self._data["files"].items()
             if data.get("count", 0) >= max_strikes
         ]
+        if flagged:
+            logger.warning("Flagged files (>=%d failures): %s", max_strikes, flagged)
+        return flagged

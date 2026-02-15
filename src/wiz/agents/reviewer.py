@@ -140,6 +140,10 @@ If the fix is inadequate:
 
                 # Check events/output for APPROVED/REJECTED
                 approved = self._check_approval(result)
+                logger.info(
+                    "Issue #%d review verdict: %s",
+                    number, "APPROVED" if approved else "REJECTED",
+                )
 
                 if approved:
                     # Create PR
@@ -210,6 +214,7 @@ If the fix is inadequate:
         # 1. Try structured JSON verdict
         verdict = self._parse_json_verdict(all_text)
         if verdict is not None:
+            logger.debug("Verdict from JSON: %s", verdict)
             return verdict
 
         # 2. Keyword scan on events (more targeted than full text)
@@ -225,9 +230,11 @@ If the fix is inadequate:
         # 3. Keyword scan on full collected text
         kw = self._keyword_verdict(all_text)
         if kw is not None:
+            logger.debug("Verdict from keyword scan: %s", kw)
             return kw
 
         # 4. Fallback
+        logger.debug("No explicit verdict found, falling back to result.success=%s", result.success)
         return result.success
 
     @staticmethod
@@ -295,6 +302,7 @@ If the fix is inadequate:
 
     def _escalate(self, issue_number: int, title: str) -> None:
         """Escalate an issue to human review."""
+        logger.warning("Escalating issue #%d (%s): max review cycles reached", issue_number, title)
         self.github.update_labels(
             issue_number,
             add=["escalated-to-human"],

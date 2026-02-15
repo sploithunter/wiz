@@ -64,7 +64,8 @@ class BridgeClient:
             return _retry(
                 _check, max_retries=self.max_retries,
             )
-        except Exception:
+        except Exception as e:
+            logger.warning("Bridge health check failed: %s", e)
             return False
 
     def create_session(
@@ -114,7 +115,8 @@ class BridgeClient:
             )
             resp.raise_for_status()
             return resp.json()
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to get session %s: %s", session_id, e)
             return None
 
     def list_sessions(self) -> list[dict[str, Any]]:
@@ -126,7 +128,8 @@ class BridgeClient:
             if isinstance(data, list):
                 return data
             return data.get("sessions", [])
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to list sessions: %s", e)
             return []
 
     def send_prompt(self, session_id: str, prompt: str) -> bool:

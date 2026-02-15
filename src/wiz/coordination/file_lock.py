@@ -57,6 +57,7 @@ class FileLockManager:
             "ttl": self.ttl,
         }
         lock_file.write_text(json.dumps(lock_data, indent=2))
+        logger.debug("Lock acquired on %s by %s", file_path, owner)
         return True
 
     def release(self, file_path: str, owner: str) -> bool:
@@ -73,6 +74,7 @@ class FileLockManager:
             pass
 
         lock_file.unlink()
+        logger.debug("Lock released on %s by %s", file_path, owner)
         return True
 
     def check(self, file_path: str) -> dict | None:
@@ -104,4 +106,6 @@ class FileLockManager:
                     released += 1
             except (json.JSONDecodeError, KeyError):
                 continue
+        if released:
+            logger.info("Released %d locks for owner %s", released, owner)
         return released

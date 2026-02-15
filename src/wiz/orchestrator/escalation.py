@@ -28,6 +28,10 @@ class EscalationManager:
     def check_and_escalate(self, issue_number: int, repo: str) -> bool:
         """Check if issue needs escalation and notify if so. Returns True if escalated."""
         if self.strikes.is_escalated(issue_number, self.max_issue_strikes):
+            logger.warning(
+                "Escalating issue #%d in %s: reached %d strikes",
+                issue_number, repo, self.max_issue_strikes,
+            )
             self.notifier.notify_escalation(
                 repo,
                 f"#{issue_number}",
@@ -40,6 +44,10 @@ class EscalationManager:
         """Check for files with recurring failures. Returns list of flagged files."""
         flagged = self.strikes.get_flagged_files(self.max_file_strikes)
         if flagged:
+            logger.warning(
+                "File pattern alert in %s: %d files with recurring failures: %s",
+                repo, len(flagged), flagged,
+            )
             self.notifier.send_message(
                 f"*File Pattern Alert* - {repo}\n"
                 f"Files with recurring failures:\n"

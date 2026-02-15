@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 import requests
 
 from wiz.config.schema import TelegramConfig
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramNotifier:
@@ -41,8 +45,12 @@ class TelegramNotifier:
                 },
                 timeout=10,
             )
-            return resp.status_code == 200
-        except requests.RequestException:
+            if resp.status_code == 200:
+                return True
+            logger.warning("Telegram send failed: HTTP %d", resp.status_code)
+            return False
+        except requests.RequestException as e:
+            logger.error("Telegram send error: %s", e)
             return False
 
     def notify_escalation(self, repo: str, issue: str, reason: str) -> bool:
