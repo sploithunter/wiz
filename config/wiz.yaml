@@ -73,7 +73,8 @@ agents:
       session_logs: true         # Pull from Wiz session logs
       github_activity: true      # Pull recent issues/comments from repos
       github_activity_limit: 10  # Max items per repo
-      exclude_repos: []          # Repos to never expose publicly (e.g., "sploithunter/private-project")
+      exclude_repos:
+        - "genesis"              # Internal project — exclude from public content
     flags: ["--chrome"]
 
   social_manager:

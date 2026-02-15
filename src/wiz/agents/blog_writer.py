@@ -60,14 +60,15 @@ def gather_github_activity(
     limit: int = 10,
 ) -> str:
     """Fetch recent GitHub issues and comments from configured repos."""
-    excluded = {r.lower() for r in exclude_repos}
+    exclude_patterns = [r.lower() for r in exclude_repos]
     lines: list[str] = []
 
     for repo in repos:
         if not repo.enabled:
             continue
         repo_name = repo.github.lower()
-        if repo_name in excluded or repo.name.lower() in excluded:
+        short_name = repo.name.lower()
+        if any(pat in repo_name or pat in short_name for pat in exclude_patterns):
             continue
 
         # Fetch recent issues (open + recently closed)

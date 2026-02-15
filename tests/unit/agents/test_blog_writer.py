@@ -382,6 +382,22 @@ class TestGatherGitHubActivity:
         mock_run.assert_not_called()
 
     @patch("wiz.agents.blog_writer.subprocess.run")
+    def test_excludes_repos_by_substring(self, mock_run):
+        repos = [
+            RepoConfig(name="genesis-api", path="/tmp/g1", github="sploithunter/genesis-api"),
+            RepoConfig(name="genesis-core", path="/tmp/g2", github="sploithunter/genesis-core"),
+            RepoConfig(name="wiz", path="/tmp/wiz", github="sploithunter/wiz"),
+        ]
+        mock_run.return_value = MagicMock(
+            stdout='[{"number": 1, "title": "Test", "state": "OPEN", "updatedAt": "2026-01-01", "labels": []}]',
+            returncode=0,
+        )
+        result = gather_github_activity(repos, exclude_repos=["genesis"], limit=5)
+        # Only wiz should be included, both genesis repos excluded
+        assert "genesis" not in result.lower()
+        assert "wiz" in result
+
+    @patch("wiz.agents.blog_writer.subprocess.run")
     def test_skips_disabled_repos(self, mock_run):
         repos = [RepoConfig(name="wiz", path="/tmp/wiz", github="sploithunter/wiz", enabled=False)]
         result = gather_github_activity(repos, exclude_repos=[], limit=5)
