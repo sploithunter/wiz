@@ -192,3 +192,71 @@ class TestBugFixerAgent:
         except RuntimeError:
             pass
         dlocks.release.assert_called_once_with(5)
+
+
+class TestParallelFixes:
+    def _make_agent(self, config=None, parallel=True):
+        runner = MagicMock(spec=SessionRunner)
+        config = config or BugFixerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        worktree = MagicMock(spec=WorktreeManager)
+        worktree.create.return_value = Path("/tmp/worktree")
+        locks = MagicMock(spec=FileLockManager)
+        locks.acquire.return_value = True
+        agent = BugFixerAgent(runner, config, github, worktree, locks, parallel=parallel)
+        return agent, runner, github, worktree, locks
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_parallel_processes_all_issues(self, _mock_check):
+        agent, runner, github, wt, locks = self._make_agent()
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        issues = [
+            {"number": i, "title": f"[P2] Bug {i}", "body": "x"}
+            for i in range(3)
+        ]
+        result = agent.run("/tmp", issues=issues)
+        assert result["issues_processed"] == 3
+        assert runner.run.call_count == 3
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_parallel_collects_results(self, _mock_check):
+        agent, runner, github, wt, locks = self._make_agent()
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        issues = [
+            {"number": 1, "title": "[P2] Bug 1"},
+            {"number": 2, "title": "[P2] Bug 2"},
+        ]
+        result = agent.run("/tmp", issues=issues)
+        issue_nums = {r["issue"] for r in result["results"]}
+        assert issue_nums == {1, 2}
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_parallel_handles_exceptions(self, _mock_check):
+        agent, runner, github, wt, locks = self._make_agent()
+        runner.run.side_effect = RuntimeError("boom")
+        issues = [
+            {"number": 1, "title": "[P2] Bug 1"},
+            {"number": 2, "title": "[P2] Bug 2"},
+        ]
+        result = agent.run("/tmp", issues=issues)
+        assert all(r["failed"] for r in result["results"])
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_sequential_when_single_issue(self, _mock_check):
+        """Parallel mode still runs sequentially for single issues."""
+        agent, runner, github, wt, locks = self._make_agent(parallel=True)
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        issues = [{"number": 1, "title": "[P2] Bug"}]
+        result = agent.run("/tmp", issues=issues)
+        assert result["issues_processed"] == 1
+
+    @patch("wiz.agents.bug_fixer._check_files_changed", return_value=True)
+    def test_parallel_false_runs_sequentially(self, _mock_check):
+        agent, runner, github, wt, locks = self._make_agent(parallel=False)
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+        issues = [
+            {"number": 1, "title": "[P2] Bug 1"},
+            {"number": 2, "title": "[P2] Bug 2"},
+        ]
+        result = agent.run("/tmp", issues=issues)
+        assert result["issues_processed"] == 2

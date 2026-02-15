@@ -149,6 +149,7 @@ class DevCyclePipeline:
         agent = BugFixerAgent(
             runner, self.config.agents.bug_fixer, github, worktree, locks,
             distributed_locks=distributed_locks,
+            parallel=self.config.dev_cycle.parallel_fixes,
         )
         return agent.run(
             repo.path,

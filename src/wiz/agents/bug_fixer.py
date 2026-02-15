@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -62,6 +63,7 @@ class BugFixerAgent(BaseAgent):
         worktree: WorktreeManager,
         locks: FileLockManager,
         distributed_locks: DistributedLockManager | None = None,
+        parallel: bool = False,
     ) -> None:
         super().__init__(runner, config)
         self.fixer_config = config
@@ -69,6 +71,7 @@ class BugFixerAgent(BaseAgent):
         self.worktree = worktree
         self.locks = locks
         self.distributed_locks = distributed_locks
+        self.parallel = parallel
 
     def build_prompt(self, **kwargs: Any) -> str:
         """Build fix prompt for a specific issue."""
@@ -104,6 +107,77 @@ class BugFixerAgent(BaseAgent):
             "issue": kwargs.get("issue", {}),
         }
 
+    def _process_issue(
+        self, issue: dict, cwd: str, timeout: float
+    ) -> dict[str, Any]:
+        """Process a single issue: acquire locks, fix in worktree, push."""
+        number = issue.get("number", 0)
+        title = issue.get("title", "")
+        owner = "bug-fixer"
+        logger.info("Fixing issue #%d: %s", number, title)
+        stagnation = StagnationDetector(limit=self.fixer_config.stagnation_limit)
+
+        # Try distributed lock first
+        if self.distributed_locks and not self.distributed_locks.acquire(number):
+            logger.info("Issue #%d claimed by another machine, skipping", number)
+            return {"issue": number, "skipped": True, "reason": "distributed-locked"}
+
+        # Try to acquire local file lock
+        lock_key = f"issue-{number}"
+        if self.locks and not self.locks.acquire(lock_key, owner):
+            logger.info("Issue #%d locked, skipping", number)
+            if self.distributed_locks:
+                self.distributed_locks.release(number)
+            return {"issue": number, "skipped": True, "reason": "locked"}
+
+        try:
+            # Create worktree if available, otherwise work in main dir
+            if self.worktree:
+                work_dir = str(self.worktree.create("fix", number))
+            else:
+                work_dir = cwd
+
+            # Build and run
+            prompt = self.build_prompt(issue=issue)
+            result = self.runner.run(
+                name=f"wiz-bug-fixer-{number}",
+                cwd=work_dir,
+                prompt=prompt,
+                agent=self.agent_type,
+                timeout=timeout,
+                flags=self.fixer_config.flags or None,
+            )
+
+            if result.success:
+                files_changed = _check_files_changed(work_dir)
+                if stagnation.check(files_changed=files_changed):
+                    logger.warning("Issue #%d: stagnation detected", number)
+                    self.github.add_comment(
+                        number, "Fix stalled: no progress after multiple attempts"
+                    )
+                    self.github.update_labels(
+                        number, add=["fix-stalled"], remove=["needs-fix"]
+                    )
+                    return {"issue": number, "stalled": True}
+                else:
+                    if self.worktree:
+                        self.worktree.push("fix", number)
+                    logger.info("Issue #%d: fix applied, pushed to fix/%d", number, number)
+                    self.github.add_comment(number, "Fix applied, ready for review")
+                    self.github.update_labels(
+                        number, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
+                    )
+                    return {"issue": number, "fixed": True}
+            else:
+                logger.warning("Issue #%d: fix failed: %s", number, result.reason)
+                return {"issue": number, "failed": True, "reason": result.reason}
+
+        finally:
+            if self.distributed_locks:
+                self.distributed_locks.release(number)
+            if self.locks:
+                self.locks.release(lock_key, owner)
+
     def run(self, cwd: str, timeout: float = 600, **kwargs: Any) -> dict[str, Any]:
         """Override run to process multiple issues with worktrees and locks."""
         issues = kwargs.get("issues", [])
@@ -133,76 +207,33 @@ class BugFixerAgent(BaseAgent):
         # Limit to max_fixes_per_run
         issues = issues[: self.fixer_config.max_fixes_per_run]
 
-        results: list[dict[str, Any]] = []
-        owner = "bug-fixer"
-
-        for issue in issues:
-            number = issue.get("number", 0)
-            title = issue.get("title", "")
-            logger.info("Fixing issue #%d: %s", number, title)
-            stagnation = StagnationDetector(limit=self.fixer_config.stagnation_limit)
-
-            # Try distributed lock first
-            if self.distributed_locks and not self.distributed_locks.acquire(number):
-                logger.info("Issue #%d claimed by another machine, skipping", number)
-                results.append({"issue": number, "skipped": True, "reason": "distributed-locked"})
-                continue
-
-            # Try to acquire local file lock
-            lock_key = f"issue-{number}"
-            if self.locks and not self.locks.acquire(lock_key, owner):
-                logger.info("Issue #%d locked, skipping", number)
-                if self.distributed_locks:
-                    self.distributed_locks.release(number)
-                results.append({"issue": number, "skipped": True, "reason": "locked"})
-                continue
-
-            try:
-                # Create worktree if available, otherwise work in main dir
-                if self.worktree:
-                    work_dir = str(self.worktree.create("fix", number))
-                else:
-                    work_dir = cwd
-
-                # Build and run
-                prompt = self.build_prompt(issue=issue)
-                result = self.runner.run(
-                    name=f"wiz-bug-fixer-{number}",
-                    cwd=work_dir,
-                    prompt=prompt,
-                    agent=self.agent_type,
-                    timeout=timeout,
-                    flags=self.fixer_config.flags or None,
-                )
-
-                if result.success:
-                    files_changed = _check_files_changed(work_dir)
-                    if stagnation.check(files_changed=files_changed):
-                        logger.warning("Issue #%d: stagnation detected", number)
-                        self.github.add_comment(
-                            number, "Fix stalled: no progress after multiple attempts"
-                        )
-                        self.github.update_labels(
-                            number, add=["fix-stalled"], remove=["needs-fix"]
-                        )
-                        results.append({"issue": number, "stalled": True})
-                    else:
-                        if self.worktree:
-                            self.worktree.push("fix", number)
-                        logger.info("Issue #%d: fix applied, pushed to fix/%d", number, number)
-                        self.github.add_comment(number, "Fix applied, ready for review")
-                        self.github.update_labels(
-                            number, add=["needs-review"], remove=["needs-fix", "wiz-bug"]
-                        )
-                        results.append({"issue": number, "fixed": True})
-                else:
-                    logger.warning("Issue #%d: fix failed: %s", number, result.reason)
-                    results.append({"issue": number, "failed": True, "reason": result.reason})
-
-            finally:
-                if self.distributed_locks:
-                    self.distributed_locks.release(number)
-                if self.locks:
-                    self.locks.release(lock_key, owner)
+        if self.parallel and len(issues) > 1:
+            results = self._run_parallel(issues, cwd, timeout)
+        else:
+            results = [self._process_issue(i, cwd, timeout) for i in issues]
 
         return {"issues_processed": len(results), "results": results}
+
+    def _run_parallel(
+        self, issues: list[dict], cwd: str, timeout: float,
+    ) -> list[dict[str, Any]]:
+        """Process issues concurrently using ThreadPoolExecutor."""
+        results: list[dict[str, Any]] = []
+        max_workers = min(len(issues), self.fixer_config.max_fixes_per_run)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_issue = {
+                executor.submit(self._process_issue, issue, cwd, timeout): issue
+                for issue in issues
+            }
+            for future in as_completed(future_to_issue):
+                issue = future_to_issue[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as e:
+                    number = issue.get("number", 0)
+                    logger.error("Issue #%d: parallel fix error: %s", number, e)
+                    results.append({"issue": number, "failed": True, "reason": str(e)})
+
+        return results
