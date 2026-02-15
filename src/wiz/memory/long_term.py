@@ -10,7 +10,7 @@ class LongTermMemory:
     """Manages long-term memory via an index.md keyword->file map and topic files."""
 
     def __init__(self, base_dir: Path) -> None:
-        self.base_dir = Path(base_dir)
+        self.base_dir = Path(base_dir).expanduser()
         self.index_path = self.base_dir / "index.md"
         self.topics_dir = self.base_dir / "topics"
         self._index: dict[str, str] = {}

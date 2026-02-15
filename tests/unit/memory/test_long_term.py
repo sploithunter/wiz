@@ -75,6 +75,16 @@ class TestLongTermMemory:
         result = mem.load_index()
         assert result == {}
 
+    def test_tilde_path_is_expanded(self, tmp_path: Path):
+        """Regression test for issue #45: tilde paths must be expanded."""
+        mem = LongTermMemory(Path("~/.wiz-long-term-test"))
+
+        # base_dir should be expanded — no literal '~' component
+        assert "~" not in str(mem.base_dir)
+        assert str(mem.base_dir) == str(
+            Path.home() / ".wiz-long-term-test"
+        )
+
     def test_skip_comments_and_blanks(self, tmp_path: Path):
         base = tmp_path / "long-term"
         base.mkdir()
