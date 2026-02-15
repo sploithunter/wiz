@@ -117,13 +117,13 @@ class DevCyclePipeline:
         state.total_elapsed = time.time() - start_time
         return state
 
-    def run_all(self) -> list[CycleState]:
+    def run_all(self, phases: list[str] | None = None) -> list[CycleState]:
         """Run dev cycle for all enabled repos."""
         results = []
         for repo in self.config.repos:
             if not repo.enabled:
                 continue
-            state = self.run_repo(repo)
+            state = self.run_repo(repo, phases)
             results.append(state)
         return results
 

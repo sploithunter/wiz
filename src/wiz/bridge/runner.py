@@ -97,6 +97,9 @@ def ensure_hooks(cwd: str | None = None) -> bool:
 class SessionRunner:
     """Runs a complete agent session lifecycle: create -> prompt -> wait -> cleanup."""
 
+    # Track session IDs created by THIS process so we never clean them up
+    _own_session_ids: set[str] = set()
+
     def __init__(
         self,
         client: BridgeClient,
@@ -113,19 +116,6 @@ class SessionRunner:
         self.on_event = on_event
         self._cleaned_up = False
         self._cleanup_on_start = cleanup_on_start
-
-    def cleanup_stale_sessions(self) -> int:
-        """Delete all stale sessions from the bridge.
-
-        Called automatically on first run() to ensure a clean slate.
-        """
-        if self._cleaned_up:
-            return 0
-        self._cleaned_up = True
-        count = self.client.cleanup_all_sessions()
-        if count > 0:
-            logger.info("Startup cleanup: removed %d stale sessions", count)
-        return count
 
     def run(
         self,
@@ -250,10 +240,6 @@ class SessionRunner:
         # Ensure hooks are installed before launching Claude Code
         ensure_hooks(cwd)
 
-        # Cleanup stale sessions on first run
-        if self._cleanup_on_start:
-            self.cleanup_stale_sessions()
-
         # Start WebSocket monitor
         self.monitor.clear()
         if self.on_event:
@@ -270,6 +256,7 @@ class SessionRunner:
             if not session_id:
                 return SessionResult(success=False, reason="failed_to_create_session")
 
+            SessionRunner._own_session_ids.add(session_id)
             logger.info("Session created: %s", session_id)
 
             # Wait for agent to initialize
@@ -325,4 +312,5 @@ class SessionRunner:
         finally:
             self.monitor.stop()
             if session_id:
+                SessionRunner._own_session_ids.discard(session_id)
                 self.client.delete_session(session_id)

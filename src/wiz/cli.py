@@ -72,7 +72,7 @@ def run_dev_cycle(ctx: click.Context, repo: str | None, phase: str | None) -> No
     if repo:
         states = [pipeline.run_repo(repo_config, phases)]
     else:
-        states = pipeline.run_all()
+        states = pipeline.run_all(phases=phases)
 
     logger.info("========== Dev cycle completed (%.1fs) ==========", time.time() - cycle_start)
 

@@ -175,13 +175,17 @@ class TestSessionRunner:
         client.delete_session.assert_called_once_with("sess-1")
 
     @_MOCK_HOOKS
-    def test_startup_cleanup_runs_once(self, _mock_hooks):
+    def test_no_startup_cleanup_during_session(self, _mock_hooks):
+        """Verify cleanup_all_sessions is NOT called during session runs.
+
+        Cleanup was removed because concurrent wiz processes would nuke
+        each other's active bridge sessions.
+        """
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
         client.create_session.return_value = "sess-1"
         client.send_prompt.return_value = True
         client.get_session.return_value = {"status": "idle"}
-        client.cleanup_all_sessions.return_value = 5
 
         monitor = MagicMock(spec=BridgeEventMonitor)
         monitor.stop_detected = False
@@ -190,19 +194,18 @@ class TestSessionRunner:
 
         runner = SessionRunner(
             client, monitor, init_wait=0.01, poll_interval=0.01,
-            cleanup_on_start=True,
         )
         runner.run("test", "/tmp", "prompt", timeout=5)
         runner.run("test2", "/tmp", "prompt2", timeout=5)
 
-        # cleanup_all_sessions called once (first run only)
-        client.cleanup_all_sessions.assert_called_once()
+        client.cleanup_all_sessions.assert_not_called()
 
     @_MOCK_HOOKS
-    def test_startup_cleanup_disabled(self, _mock_hooks):
+    def test_own_session_ids_tracked(self, _mock_hooks):
+        """Verify created sessions are tracked in _own_session_ids."""
         client = MagicMock(spec=BridgeClient)
         client.health_check.return_value = True
-        client.create_session.return_value = "sess-1"
+        client.create_session.return_value = "sess-tracked"
         client.send_prompt.return_value = True
         client.get_session.return_value = {"status": "idle"}
 
@@ -211,12 +214,14 @@ class TestSessionRunner:
         monitor.wait_for_stop.return_value = False
         monitor.events = []
 
+        SessionRunner._own_session_ids.clear()
         runner = SessionRunner(
             client, monitor, init_wait=0.01, poll_interval=0.01,
-            cleanup_on_start=False,
         )
         runner.run("test", "/tmp", "prompt", timeout=5)
-        client.cleanup_all_sessions.assert_not_called()
+
+        # After run completes, session is cleaned up from tracking
+        assert "sess-tracked" not in SessionRunner._own_session_ids
 
     @patch("wiz.bridge.runner.subprocess.run")
     @patch("wiz.bridge.runner.shutil.which", return_value="/usr/bin/codex")

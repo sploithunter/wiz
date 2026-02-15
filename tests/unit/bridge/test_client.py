@@ -175,3 +175,20 @@ class TestBridgeClient:
 
         count = self.client.cleanup_all_sessions()
         assert count == 1
+
+    @patch("wiz.bridge.client.requests.delete")
+    @patch("wiz.bridge.client.requests.get")
+    def test_cleanup_excludes_own_sessions(self, mock_get, mock_delete):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}],
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+        mock_delete.return_value = MagicMock(status_code=200)
+        mock_delete.return_value.raise_for_status = MagicMock()
+
+        count = self.client.cleanup_all_sessions(exclude={"s2"})
+        assert count == 2
+        # s2 should NOT have been deleted
+        deleted_urls = [call.args[0] for call in mock_delete.call_args_list]
+        assert not any("s2" in url for url in deleted_urls)
