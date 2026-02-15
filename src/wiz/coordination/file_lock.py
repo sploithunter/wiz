@@ -6,6 +6,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 class FileLockManager:
     """JSON-based file locks with TTL expiry.
 
-    Locks are stored in .wiz/locks/ with path encoding (/ -> --).
+    Locks are stored in .wiz/locks/ with URL-encoded filenames.
     """
 
     def __init__(self, repo_path: Path, lock_dir: str = ".wiz/locks", ttl: int = 600) -> None:
@@ -23,7 +24,7 @@ class FileLockManager:
 
     def _encode_path(self, file_path: str) -> str:
         """Encode a file path for use as a lock filename."""
-        return file_path.replace("/", "--").replace("\\", "--")
+        return quote(file_path, safe="")
 
     def _lock_path(self, file_path: str) -> Path:
         return self.lock_dir / f"{self._encode_path(file_path)}.lock"
