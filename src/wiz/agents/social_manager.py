@@ -130,6 +130,12 @@ Create up to {self.social_config.social_posts_per_week} drafts.
         if self.social_config.social_posts_per_week == 0:
             return {"skipped": True, "reason": "disabled"}
 
+        if self.social_config.require_approval:
+            logger.info(
+                "Social post creation awaiting approval (require_approval=True)"
+            )
+            return {"skipped": True, "reason": "awaiting_approval"}
+
         prompt = self.build_prompt(**kwargs)
         result = self.runner.run(
             name="wiz-social-manager",

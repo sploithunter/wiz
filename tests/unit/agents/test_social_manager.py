@@ -13,7 +13,7 @@ from wiz.memory.long_term import LongTermMemory
 class TestSocialManagerAgent:
     def _make_agent(self, config=None, with_memory=False, typefully=None):
         runner = MagicMock(spec=SessionRunner)
-        config = config or SocialManagerConfig()
+        config = config or SocialManagerConfig(require_approval=False)
         memory = MagicMock(spec=LongTermMemory) if with_memory else None
         if memory:
             memory.retrieve.return_value = []
@@ -74,7 +74,7 @@ class TestSocialManagerAgent:
         typefully.enabled = True
         typefully.create_draft.return_value = DraftResult(success=True, draft_id=42)
 
-        config = SocialManagerConfig(platforms=["x", "linkedin"])
+        config = SocialManagerConfig(platforms=["x", "linkedin"], require_approval=False)
         agent, runner, _ = self._make_agent(config, typefully=typefully)
 
         json_output = '```json\n{"draft_title": "Test", "posts": [{"text": "hello"}]}\n```'
@@ -158,7 +158,7 @@ class TestSocialManagerAgent:
             success=True, doc_id="sd1", url="https://docs.google.com/document/d/sd1/edit"
         )
 
-        config = SocialManagerConfig()
+        config = SocialManagerConfig(require_approval=False)
         agent, runner, _ = self._make_agent(config, typefully=typefully)
         agent.google_docs = gdocs
 
@@ -187,6 +187,47 @@ class TestSocialManagerAgent:
 
         result = agent.run("/tmp")
         assert result["doc_urls"] == []
+
+
+class TestSocialManagerApproval:
+    """Tests for require_approval enforcement."""
+
+    def _make_agent(self, config=None, typefully=None):
+        runner = MagicMock(spec=SessionRunner)
+        config = config or SocialManagerConfig()
+        if typefully is None:
+            typefully = MagicMock(spec=TypefullyClient)
+            typefully.enabled = True
+        return SocialManagerAgent(runner, config, typefully=typefully), runner
+
+    def test_require_approval_blocks_run(self):
+        """When require_approval=True, skip session and draft creation."""
+        config = SocialManagerConfig(require_approval=True)
+        agent, runner = self._make_agent(config)
+
+        result = agent.run("/tmp")
+        assert result["skipped"] is True
+        assert result["reason"] == "awaiting_approval"
+        runner.run.assert_not_called()
+
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_no_approval_allows_run(self, _mock_img):
+        """When require_approval=False, session runs normally."""
+        config = SocialManagerConfig(require_approval=False)
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = False
+        agent, runner = self._make_agent(config, typefully=typefully)
+
+        runner.run.return_value = SessionResult(success=True, reason="completed")
+
+        result = agent.run("/tmp")
+        assert result["success"] is True
+        runner.run.assert_called_once()
+
+    def test_require_approval_default_is_true(self):
+        """Default config has require_approval=True."""
+        config = SocialManagerConfig()
+        assert config.require_approval is True
 
 
 class TestExtractJsonBlocks:

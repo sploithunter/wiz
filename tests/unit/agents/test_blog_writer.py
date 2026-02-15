@@ -108,7 +108,7 @@ class TestBlogWriterRun:
 
     def _make_agent(self, config=None, with_memory=True):
         runner = MagicMock(spec=SessionRunner)
-        config = config or BlogWriterConfig()
+        config = config or BlogWriterConfig(require_approval=False)
         memory = MagicMock(spec=LongTermMemory) if with_memory else None
         if memory:
             memory.retrieve.return_value = []
@@ -286,6 +286,52 @@ class TestBlogWriterRun:
         agent.run("/tmp")
         call_kwargs = runner.run.call_args[1]
         assert "Building AI agents with Python" in call_kwargs["prompt"]
+
+    def test_run_require_approval_blocks_write_mode(self):
+        """When require_approval=True and a pending topic exists, skip writing."""
+        config = BlogWriterConfig(require_approval=True)
+        agent, runner, memory = self._make_agent(config)
+        memory.retrieve.return_value = [
+            (PROPOSED_TOPIC_KEY, "How to build AI agents")
+        ]
+
+        result = agent.run("/tmp")
+        assert result["skipped"] is True
+        assert result["reason"] == "awaiting_approval"
+        assert result["pending_topic"] == "How to build AI agents"
+        runner.run.assert_not_called()
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_run_no_approval_allows_write_mode(self, _mock_img):
+        """When require_approval=False and a pending topic exists, write proceeds."""
+        config = BlogWriterConfig(require_approval=False)
+        agent, runner, memory = self._make_agent(config)
+        memory.retrieve.return_value = [
+            (PROPOSED_TOPIC_KEY, "How to build AI agents")
+        ]
+        runner.run.return_value = SessionResult(success=True, reason="done")
+
+        result = agent.run("/tmp")
+        assert result["mode"] == "write"
+        assert result["success"] is True
+        runner.run.assert_called_once()
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_run_require_approval_still_allows_propose(self, _mock_img):
+        """When require_approval=True but no pending topic, propose still works."""
+        config = BlogWriterConfig(require_approval=True)
+        agent, runner, memory = self._make_agent(config)
+        memory.retrieve.return_value = []  # no pending topic
+
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="done",
+            events=[{"data": {"message": "Topic: Test"}}],
+        )
+
+        result = agent.run("/tmp")
+        assert result["mode"] == "propose"
+        runner.run.assert_called_once()
 
 
 class TestGetPendingTopic:

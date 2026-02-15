@@ -251,6 +251,16 @@ Draw on the project activity context above where relevant.
         pending_topic = self._get_pending_topic()
 
         if pending_topic:
+            if self.blog_config.require_approval:
+                logger.info(
+                    "Pending topic awaiting approval (require_approval=True)"
+                )
+                return {
+                    "skipped": True,
+                    "reason": "awaiting_approval",
+                    "pending_topic": pending_topic,
+                }
+
             # Write mode: draft the pending topic
             logger.info("Found pending topic, switching to write mode")
             prompt = self.build_prompt(mode="write", topic=pending_topic)
