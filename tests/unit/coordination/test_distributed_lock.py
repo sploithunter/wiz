@@ -134,6 +134,7 @@ class TestDistributedLockManager:
 
     def test_cleanup_stale_removes_our_labels(self):
         mgr, github = self._make_manager("mac-1")
+        github.list_labels.return_value = ["wiz-claimed-by-mac-1"]
         github.list_issues.return_value = [
             {"number": 10},
             {"number": 20},
@@ -145,14 +146,59 @@ class TestDistributedLockManager:
 
     def test_cleanup_stale_no_issues(self):
         mgr, github = self._make_manager()
+        github.list_labels.return_value = ["wiz-claimed-by-mac-1"]
         github.list_issues.return_value = []
         assert mgr.cleanup_stale() == 0
 
     def test_cleanup_stale_partial_failure(self):
         mgr, github = self._make_manager("mac-1")
+        github.list_labels.return_value = ["wiz-claimed-by-mac-1"]
         github.list_issues.return_value = [
             {"number": 10},
             {"number": 20},
         ]
         github.update_labels.side_effect = [True, False]
         assert mgr.cleanup_stale() == 1
+
+    def test_cleanup_stale_removes_foreign_labels(self):
+        """Regression: stale foreign claim labels must be cleaned up.
+
+        If another machine crashes with a claim label, cleanup_stale()
+        should remove it so the issue isn't blocked forever.
+        See: https://github.com/.../issues/65
+        """
+        mgr, github = self._make_manager("live-machine")
+        github.list_labels.return_value = [
+            "wiz-bug",
+            "wiz-claimed-by-live-machine",
+            "wiz-claimed-by-dead-machine",
+        ]
+        # Our own label has one issue, foreign label has another
+        def fake_list_issues(labels=None, **kwargs):
+            if labels == ["wiz-claimed-by-live-machine"]:
+                return [{"number": 10}]
+            if labels == ["wiz-claimed-by-dead-machine"]:
+                return [{"number": 20}]
+            return []
+
+        github.list_issues.side_effect = fake_list_issues
+        github.update_labels.return_value = True
+
+        count = mgr.cleanup_stale()
+        assert count == 2
+        # Verify both our own and foreign labels were removed
+        github.update_labels.assert_any_call(10, remove=["wiz-claimed-by-live-machine"])
+        github.update_labels.assert_any_call(20, remove=["wiz-claimed-by-dead-machine"])
+
+    def test_cleanup_stale_no_claim_labels_on_repo(self):
+        """When no claim labels exist on the repo, cleanup returns 0."""
+        mgr, github = self._make_manager("mac-1")
+        github.list_labels.return_value = ["wiz-bug", "needs-fix"]
+        assert mgr.cleanup_stale() == 0
+        github.list_issues.assert_not_called()
+
+    def test_cleanup_stale_list_labels_failure_returns_zero(self):
+        """If list_labels fails (returns []), cleanup handles it gracefully."""
+        mgr, github = self._make_manager("mac-1")
+        github.list_labels.return_value = []
+        assert mgr.cleanup_stale() == 0

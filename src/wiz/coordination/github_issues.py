@@ -199,6 +199,16 @@ class GitHubIssues:
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
             return []
 
+    def list_labels(self, limit: int = 500) -> list[str]:
+        """List all label names on the repo."""
+        args = ["label", "list", "--limit", str(limit), "--json", "name"]
+        try:
+            result = self._run_gh(args)
+            labels = json.loads(result.stdout) if result.stdout.strip() else []
+            return [lbl["name"] for lbl in labels if isinstance(lbl, dict) and "name" in lbl]
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+            return []
+
     def check_duplicate(self, title: str) -> bool:
         """Check if an issue with similar title exists."""
         issues = self.list_issues()

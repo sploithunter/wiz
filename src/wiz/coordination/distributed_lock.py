@@ -104,12 +104,31 @@ class DistributedLockManager:
         return len(_get_claim_labels(issue)) > 0
 
     def cleanup_stale(self) -> int:
-        """Remove all our claim labels from open issues (crash recovery)."""
-        issues = self.github.list_issues(labels=[self._label])
+        """Remove stale claim labels from open issues (crash recovery).
+
+        Removes both our own claims and foreign claims from other machines
+        that may have crashed. This prevents stale foreign labels from
+        blocking issue processing indefinitely.
+        """
+        # Discover all wiz-claimed-by-* labels on the repo
+        all_labels = self.github.list_labels()
+        claim_labels = [lbl for lbl in all_labels if lbl.startswith(CLAIM_PREFIX)]
+
+        if not claim_labels:
+            return 0
+
         count = 0
-        for issue in issues:
-            number = issue.get("number", 0)
-            if self.github.update_labels(number, remove=[self._label]):
-                count += 1
-                logger.info("Cleaned up stale claim on #%d", number)
+        for label in claim_labels:
+            issues = self.github.list_issues(labels=[label])
+            for issue in issues:
+                number = issue.get("number", 0)
+                if self.github.update_labels(number, remove=[label]):
+                    count += 1
+                    if label == self._label:
+                        logger.info("Cleaned up own stale claim on #%d", number)
+                    else:
+                        logger.info(
+                            "Cleaned up foreign stale claim %r on #%d",
+                            label, number,
+                        )
         return count

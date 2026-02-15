@@ -234,6 +234,35 @@ class TestAuthorFiltering:
         assert result["number"] == 42
 
 
+class TestListLabels:
+    def setup_method(self):
+        self.gh = GitHubIssues("user/repo")
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_list_labels_success(self, mock_run):
+        labels = [{"name": "wiz-bug"}, {"name": "wiz-claimed-by-mac-1"}]
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps(labels), returncode=0,
+        )
+        result = self.gh.list_labels()
+        assert result == ["wiz-bug", "wiz-claimed-by-mac-1"]
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_list_labels_empty(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="[]", returncode=0)
+        assert self.gh.list_labels() == []
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_list_labels_failure(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "gh")
+        assert self.gh.list_labels() == []
+
+    @patch("wiz.coordination.github_issues.subprocess.run")
+    def test_list_labels_gh_missing(self, mock_run):
+        mock_run.side_effect = FileNotFoundError(2, "No such file or directory")
+        assert self.gh.list_labels() == []
+
+
 class TestGhMissing:
     """Regression tests for missing gh CLI (FileNotFoundError)."""
 
