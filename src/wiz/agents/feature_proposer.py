@@ -130,12 +130,16 @@ Commit all changes and ensure all tests pass.
             )
 
             if result.success:
-                self.worktree.push("feature", number)
-                self.github.update_labels(
-                    number,
-                    add=["feature-implemented"],
-                    remove=["feature-approved"],
-                )
+                pushed = self.worktree.push("feature", number)
+                if pushed:
+                    self.github.update_labels(
+                        number,
+                        add=["feature-implemented"],
+                        remove=["feature-approved"],
+                    )
+                else:
+                    logger.error("Push failed for feature #%d; keeping feature-approved label", number)
+                    return {"success": False, "reason": "push_failed", "mode": "implement"}
 
             return self.process_result(result, mode="implement")
 
@@ -160,12 +164,16 @@ Commit all changes and ensure all tests pass.
             )
 
             if result.success:
-                self.worktree.push("feature", number)
-                self.github.update_labels(
-                    number,
-                    add=["feature-implemented"],
-                    remove=["feature-approved"],
-                )
+                pushed = self.worktree.push("feature", number)
+                if pushed:
+                    self.github.update_labels(
+                        number,
+                        add=["feature-implemented"],
+                        remove=["feature-approved"],
+                    )
+                else:
+                    logger.error("Push failed for feature #%d; keeping feature-approved label", number)
+                    return {"success": False, "reason": "push_failed", "mode": "implement"}
 
             return self.process_result(result, mode="implement")
 
