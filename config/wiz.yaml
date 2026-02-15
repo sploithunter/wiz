@@ -77,7 +77,7 @@ agents:
     model: "claude"
     max_fixes_per_run: 5
     stagnation_limit: 3
-    session_timeout: 600
+    session_timeout: 2400  # 40 min per fix — Claude typically finishes in 10-30 min
     flags: ["--chrome"]
 
   reviewer:
