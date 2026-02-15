@@ -14,13 +14,14 @@ for continuous development, content creation, and project management.
 
 ## Key Directories
 - `src/wiz/` - Main package
-- `src/wiz/agents/` - Agent implementations (bug_hunter, bug_fixer, reviewer, etc.)
+- `src/wiz/agents/` - Agent implementations (bug_hunter, bug_fixer, reviewer, feature_proposer, blog_writer, social_manager)
 - `src/wiz/bridge/` - Bridge client, monitor, and runner
 - `src/wiz/config/` - Configuration schema and loader
 - `src/wiz/coordination/` - GitHub, worktrees, locks, strikes
+- `src/wiz/integrations/` - External services (Google Docs, Typefully, image prompts)
 - `src/wiz/memory/` - Short-term, long-term, session logging
 - `src/wiz/notifications/` - Telegram notifications
-- `src/wiz/orchestrator/` - Pipeline, scheduler, escalation, reporter
+- `src/wiz/orchestrator/` - Pipeline, scheduler, escalation, reporter, self-improvement guard
 - `agents/` - Per-agent CLAUDE.md instruction files
 - `config/wiz.yaml` - Main configuration
 - `tests/` - Test suite (unit, integration, e2e)

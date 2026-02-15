@@ -33,15 +33,22 @@ Bug Hunt (Codex)  →  Bug Fix (Claude)  →  Review (Codex)
 
 ### Feature Cycle
 
-Two-phase with a human gate:
+Automated propose→approve→implement workflow:
 
 1. **Propose** — Agent creates `feature-candidate` issues with design details
-2. **Implement** — After human approval (label changed to `feature-approved`), agent implements the feature
+2. **Approve** — Human approves via `feature-approved` label (Telegram notification sent), or auto-approves when `require_approval: false`
+3. **Implement** — Agent implements in a worktree, pushes, labels `feature-implemented`
+
+**Label lifecycle:** `feature-candidate` → `feature-approved` → `feature-implemented`
 
 ### Content Cycle
 
-1. **Blog Writer** — Proposes topics or writes full drafts, uses long-term memory to avoid repeating topics
-2. **Social Manager** — Creates Typefully drafts via MCP tools for scheduled social posting
+1. **Blog Writer** — Two-phase with automatic mode transition:
+   - **Propose mode** — Analyzes recent project activity (session logs + GitHub issues/comments) and proposes a topic, stored in long-term memory
+   - **Write mode** — On next run, picks up the pending topic and writes a full draft
+   - Creates Google Docs for review (when configured) or saves to local markdown
+   - Image generation prompts included in output
+2. **Social Manager** — Creates Typefully drafts for X and LinkedIn, with companion Google Docs and image prompts
 
 ## Coordination
 
@@ -53,7 +60,7 @@ Multiple safety mechanisms prevent agents from stepping on each other:
 | **File locks** | Per-issue locks with TTL prevent two agents on the same machine from fixing the same issue |
 | **Label state machine** | Issues transition through labels; agents only pick up issues matching their phase |
 | **Duplicate detection** | Bug hunter receives existing issues in its prompt to avoid duplicates |
-| **Stagnation detector** | Circuit-breaks after N consecutive no-change attempts |
+| **Stagnation detector** | Checks actual `git diff` for file changes; circuit-breaks when no progress detected |
 | **Loop tracker** | Caps fix→review cycles per issue (default 3), then escalates to human |
 | **Strike tracker** | Tracks per-issue and per-file failure counts for escalation |
 | **Worktrees** | Each fix runs in an isolated git worktree to avoid conflicts |
@@ -63,11 +70,11 @@ Multiple safety mechanisms prevent agents from stepping on each other:
 | Agent | Model | Role |
 |-------|-------|------|
 | Bug Hunter | Codex | Scans repos for bugs, creates prioritized GitHub issues (P0-P4) |
-| Bug Fixer | Claude | Fixes bugs in worktrees, writes regression tests, commits |
-| Reviewer | Codex | Reviews fixes, approves (creates PR) or rejects (sends back) |
-| Feature Proposer | Claude | Proposes features or implements approved ones |
-| Blog Writer | Claude | Writes technical blog posts from project context |
-| Social Manager | Claude | Creates social media drafts via Typefully |
+| Bug Fixer | Claude | Fixes bugs in worktrees (sequential or parallel), writes regression tests |
+| Reviewer | Codex | Reviews fixes with structured JSON or keyword verdict parsing, creates PRs or sends back |
+| Feature Proposer | Claude | Proposes features, auto-approves or notifies via Telegram, implements in worktrees |
+| Blog Writer | Claude | Two-phase: proposes topics from project activity, writes drafts with Google Docs integration |
+| Social Manager | Claude | Creates social media drafts via Typefully REST API for X + LinkedIn |
 
 Each agent has its own `CLAUDE.md` instruction file in `agents/<agent-name>/`.
 
@@ -83,6 +90,10 @@ Each agent has its own `CLAUDE.md` instruction file in `agents/<agent-name>/`.
 ### Install
 
 ```bash
+# Quick setup (installs deps, configures hooks, creates dirs)
+./scripts/setup.sh
+
+# Or manually
 pip install -e ".[dev]"
 ```
 
@@ -99,6 +110,7 @@ repos:
     path: "/path/to/repo"
     github: "owner/repo"
     enabled: true
+    self_improve: false  # Set true for Wiz's own repo
 
 agents:
   bug_hunter:
@@ -110,6 +122,21 @@ agents:
   reviewer:
     model: "codex"
     max_reviews_per_run: 10
+  feature_proposer:
+    require_approval: true  # false = auto-approve candidates
+    auto_propose_features: true
+  blog_writer:
+    auto_propose_topics: true
+    context_sources:
+      session_logs: true
+      github_activity: true
+      exclude_repos: ["genesis"]  # Substring match — excludes all matching repos
+
+dev_cycle:
+  parallel_fixes: false  # true = fix multiple issues concurrently via ThreadPoolExecutor
+
+google_docs:
+  enabled: false  # Set true + run `wiz google-auth` for Google Docs integration
 ```
 
 See `src/wiz/config/schema.py` for all available options.
@@ -248,11 +275,12 @@ mypy src/wiz/
 
 - **PRs are never auto-merged** — Human review required for all changes
 - **Three-strike escalation** — Issues that fail repeatedly get escalated with Telegram alerts
-- **Self-improvement guard** — When Wiz works on its own repo, protected files (`config/wiz.yaml`, `CLAUDE.md`, `schema.py`, `escalation.py`) require human PR approval
+- **Self-improvement guard** — When Wiz works on its own repo (`self_improve: true`), the reviewer checks changed files against protected patterns (`config/wiz.yaml`, `CLAUDE.md`, `schema.py`, `escalation.py`). Protected file changes get `requires-human-review` label and Telegram notification instead of auto-closing
+- **Structured approval parsing** — Reviewer uses 3-tier verdict: (1) JSON `{"verdict": "approved"}`, (2) keyword scan with word boundaries, (3) fallback to session success
 - **Distributed locking** — GitHub label-based claims prevent cross-machine conflicts
 - **File locking** — Prevents concurrent modification conflicts on the same machine
-- **Stagnation circuit breaker** — Stops agents that aren't making progress
-- **Loop cap** — Fix-review cycles are capped to prevent infinite loops
+- **Stagnation circuit breaker** — Checks actual `git diff` for file changes, stops agents that aren't making progress
+- **Loop cap** — Fix-review cycles are capped per issue (default 3), then escalates to human
 
 ## Project Structure
 
@@ -287,11 +315,17 @@ src/wiz/
 │   ├── short_term.py
 │   ├── long_term.py
 │   └── session_log.py
+├── integrations/    # External services
+│   ├── google_docs.py
+│   ├── image_prompts.py
+│   └── typefully.py
 ├── notifications/   # Alerting
 │   └── telegram.py
 └── orchestrator/    # Pipeline execution
     ├── pipeline.py
     ├── content_pipeline.py
+    ├── feature_pipeline.py
+    ├── self_improve.py
     ├── scheduler.py
     ├── escalation.py
     ├── reporter.py
