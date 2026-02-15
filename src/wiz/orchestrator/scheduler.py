@@ -77,13 +77,12 @@ class LaunchdScheduler:
         for time_str in schedule.times:
             hour, minute = self._parse_time(time_str)
             for day in schedule.days:
-                weekday = DAY_MAP.get(day.lower())
-                if weekday is not None:
-                    intervals.append(
-                        INTERVAL_TEMPLATE.format(
-                            weekday=weekday, hour=hour, minute=minute
-                        )
+                weekday = self._validate_day(day)
+                intervals.append(
+                    INTERVAL_TEMPLATE.format(
+                        weekday=weekday, hour=hour, minute=minute
                     )
+                )
 
         args = [str(self.script), cycle_type] + (extra_args or [])
         program_args = "\n".join(
@@ -98,9 +97,46 @@ class LaunchdScheduler:
             working_dir=self.wiz_dir,
         )
 
+    def _validate_day(self, day: str) -> int:
+        """Validate and return weekday number for a day abbreviation."""
+        weekday = DAY_MAP.get(day.lower())
+        if weekday is None:
+            valid = ", ".join(sorted(DAY_MAP.keys()))
+            raise ValueError(
+                f"Invalid day name '{day}': must be one of {valid}"
+            )
+        return weekday
+
     def _parse_time(self, time_str: str) -> tuple[int, int]:
+        """Parse a time string like '07:00' or '9' into (hour, minute)."""
         parts = time_str.split(":")
-        return int(parts[0]), int(parts[1]) if len(parts) > 1 else 0
+        if len(parts) > 2:
+            raise ValueError(
+                f"Invalid time format '{time_str}': expected 'HH:MM' or 'H'"
+            )
+        try:
+            hour = int(parts[0])
+        except ValueError:
+            raise ValueError(
+                f"Invalid time format '{time_str}': hour is not a number"
+            ) from None
+        minute = 0
+        if len(parts) > 1:
+            try:
+                minute = int(parts[1])
+            except ValueError:
+                raise ValueError(
+                    f"Invalid time format '{time_str}': minute is not a number"
+                ) from None
+        if not (0 <= hour <= 23):
+            raise ValueError(
+                f"Invalid time '{time_str}': hour must be 0-23, got {hour}"
+            )
+        if not (0 <= minute <= 59):
+            raise ValueError(
+                f"Invalid time '{time_str}': minute must be 0-59, got {minute}"
+            )
+        return hour, minute
 
     def install(self, label: str, plist_content: str) -> bool:
         """Write plist and load via launchctl."""
