@@ -244,6 +244,63 @@ class TestBugFixerAgent:
         dlocks.release.assert_called_once_with(5)
 
 
+class TestReviewerFeedbackLoop:
+    """Test that bug fixer includes reviewer feedback in retry prompts."""
+
+    def _make_agent(self, config=None):
+        runner = MagicMock(spec=SessionRunner)
+        config = config or BugFixerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        worktree = MagicMock(spec=WorktreeManager)
+        worktree.create.return_value = Path("/tmp/worktree")
+        locks = MagicMock(spec=FileLockManager)
+        locks.acquire.return_value = True
+        agent = BugFixerAgent(runner, config, github, worktree, locks)
+        return agent, runner, github
+
+    def test_prompt_includes_reviewer_feedback_for_needs_fix(self):
+        agent, runner, github = self._make_agent()
+        github.get_comments.return_value = [
+            {"body": "**Review: REJECTED**\n\nMissing test for empty input edge case"}
+        ]
+
+        issue = {
+            "number": 42,
+            "title": "[P2] Bug",
+            "body": "The function crashes on null",
+            "labels": [{"name": "needs-fix"}],
+        }
+        prompt = agent.build_prompt(issue=issue)
+        assert "Previous Review Feedback" in prompt
+        assert "Missing test for empty input edge case" in prompt
+
+    def test_prompt_no_feedback_for_fresh_issue(self):
+        agent, runner, github = self._make_agent()
+
+        issue = {
+            "number": 42,
+            "title": "[P2] Bug",
+            "body": "The function crashes on null",
+            "labels": [{"name": "wiz-bug"}],
+        }
+        prompt = agent.build_prompt(issue=issue)
+        assert "Previous Review Feedback" not in prompt
+        github.get_comments.assert_not_called()
+
+    def test_prompt_graceful_when_no_comments(self):
+        agent, runner, github = self._make_agent()
+        github.get_comments.return_value = []
+
+        issue = {
+            "number": 42,
+            "title": "[P2] Bug",
+            "body": "desc",
+            "labels": [{"name": "needs-fix"}],
+        }
+        prompt = agent.build_prompt(issue=issue)
+        assert "Previous Review Feedback" not in prompt
+
+
 class TestParallelFixes:
     def _make_agent(self, config=None, parallel=True):
         runner = MagicMock(spec=SessionRunner)

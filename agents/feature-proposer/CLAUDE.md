@@ -23,7 +23,8 @@ When implementing an approved feature:
    - Test both success and failure paths
    - Test edge cases (empty inputs, invalid data, timeouts)
 5. Run the **full** test suite: `pytest tests/ -v`
-6. **DO NOT commit if any tests fail.** Fix all failures first, then re-run
+6. **DO NOT commit if any tests fail.** Fix ALL failures first, then re-run
+   - **This includes "pre-existing" failures.** If a test was already broken before your changes, you MUST fix it before committing. Do not use `--no-verify` to bypass checks.
 7. Commit with a descriptive message
 
 ## Testing Requirements
@@ -37,6 +38,8 @@ When implementing an approved feature:
 ## Rules
 - Scope to what can be done in one session
 - Always include tests — **no code ships without tests**
-- **Never commit with failing tests** — all tests must pass
+- **Never commit with failing tests** — ALL tests must pass, including pre-existing failures
+- **Never use `--no-verify`** to skip pre-commit hooks, linters, or test checks
+- **Never dismiss a test failure as "pre-existing"** — if you find a broken test, fix it
 - Don't break existing functionality
 - Commit format: `feat: {description}`

@@ -29,7 +29,8 @@ class TestReviewerAgent:
             repo_name="test/repo", self_improve=self_improve,
         ), runner, github, prs, notifier
 
-    def test_approval_path(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_approval_path(self, mock_files, tmp_path: Path):
         """Approved fix -> PR created, issue closed."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         # Return result with APPROVED in events
@@ -146,7 +147,8 @@ class TestReviewerAgent:
         result = agent.run("/tmp", issues=issues)
         assert result["reviews"] == 2
 
-    def test_distributed_lock_skipped_when_none(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_distributed_lock_skipped_when_none(self, mock_files, tmp_path: Path):
         """No distributed_locks means no distributed locking."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         assert agent.distributed_locks is None
@@ -159,7 +161,8 @@ class TestReviewerAgent:
         result = agent.run("/tmp", issues=issues)
         assert result["results"][0]["action"] == "approved"
 
-    def test_distributed_lock_released_after_review(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_distributed_lock_released_after_review(self, mock_files, tmp_path: Path):
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         dlocks = MagicMock(spec=DistributedLockManager)
         agent.distributed_locks = dlocks
@@ -194,7 +197,8 @@ class TestCheckApproval:
             success=True, reason="done",
             events=[{"data": {"message": '```json\n{"verdict": "approved", "reason": "looks good"}\n```'}}],
         )
-        assert agent._check_approval(result) is True
+        approved, feedback = agent._check_approval(result)
+        assert approved is True
 
     def test_json_verdict_rejected(self, tmp_path):
         agent = self._make_agent(tmp_path)
@@ -202,7 +206,9 @@ class TestCheckApproval:
             success=True, reason="done",
             events=[{"data": {"message": '```json\n{"verdict": "rejected", "reason": "needs tests"}\n```'}}],
         )
-        assert agent._check_approval(result) is False
+        approved, feedback = agent._check_approval(result)
+        assert approved is False
+        assert "needs tests" in feedback
 
     def test_keyword_approved_in_response(self, tmp_path):
         agent = self._make_agent(tmp_path)
@@ -210,7 +216,8 @@ class TestCheckApproval:
             success=True, reason="done",
             events=[{"data": {"response": "After thorough review: APPROVED"}}],
         )
-        assert agent._check_approval(result) is True
+        approved, _ = agent._check_approval(result)
+        assert approved is True
 
     def test_keyword_rejected_in_response(self, tmp_path):
         agent = self._make_agent(tmp_path)
@@ -218,7 +225,9 @@ class TestCheckApproval:
             success=True, reason="done",
             events=[{"data": {"response": "REJECTED - needs more work"}}],
         )
-        assert agent._check_approval(result) is False
+        approved, feedback = agent._check_approval(result)
+        assert approved is False
+        assert "needs more work" in feedback
 
     def test_keyword_in_text_field(self, tmp_path):
         agent = self._make_agent(tmp_path)
@@ -226,7 +235,8 @@ class TestCheckApproval:
             success=True, reason="done",
             events=[{"text": "Review complete: APPROVED"}],
         )
-        assert agent._check_approval(result) is True
+        approved, _ = agent._check_approval(result)
+        assert approved is True
 
     def test_keyword_in_reason_fallback(self, tmp_path):
         agent = self._make_agent(tmp_path)
@@ -234,7 +244,8 @@ class TestCheckApproval:
             success=True, reason="APPROVED after review",
             events=[],
         )
-        assert agent._check_approval(result) is True
+        approved, _ = agent._check_approval(result)
+        assert approved is True
 
     def test_json_verdict_takes_priority_over_keywords(self, tmp_path):
         """JSON verdict should win even if keywords say otherwise."""
@@ -243,17 +254,20 @@ class TestCheckApproval:
             success=True, reason="done",
             events=[{"data": {"message": 'The fix was APPROVED but ```json\n{"verdict": "rejected"}\n```'}}],
         )
-        assert agent._check_approval(result) is False
+        approved, _ = agent._check_approval(result)
+        assert approved is False
 
     def test_fallback_to_result_success(self, tmp_path):
         agent = self._make_agent(tmp_path)
         result = SessionResult(success=True, reason="done", events=[])
-        assert agent._check_approval(result) is True
+        approved, _ = agent._check_approval(result)
+        assert approved is True
 
     def test_fallback_to_result_failure(self, tmp_path):
         agent = self._make_agent(tmp_path)
         result = SessionResult(success=False, reason="timeout", events=[])
-        assert agent._check_approval(result) is False
+        approved, _ = agent._check_approval(result)
+        assert approved is False
 
 
 class TestParseJsonVerdict:
@@ -364,7 +378,8 @@ class TestOutputFieldApproval:
             success=True, reason="completed", events=[],
             output="Review complete. APPROVED - fix looks correct.",
         )
-        assert agent._check_approval(result) is True
+        approved, _ = agent._check_approval(result)
+        assert approved is True
 
     def test_output_field_rejected(self, tmp_path):
         agent = self._make_agent(tmp_path)
@@ -372,7 +387,9 @@ class TestOutputFieldApproval:
             success=True, reason="completed", events=[],
             output="REJECTED - no test coverage for edge cases.",
         )
-        assert agent._check_approval(result) is False
+        approved, feedback = agent._check_approval(result)
+        assert approved is False
+        assert "no test coverage" in feedback
 
     def test_output_field_json_verdict(self, tmp_path):
         agent = self._make_agent(tmp_path)
@@ -380,7 +397,9 @@ class TestOutputFieldApproval:
             success=True, reason="completed", events=[],
             output='```json\n{"verdict": "rejected", "reason": "missing tests"}\n```',
         )
-        assert agent._check_approval(result) is False
+        approved, feedback = agent._check_approval(result)
+        assert approved is False
+        assert "missing tests" in feedback
 
 
 class TestAutoMerge:
@@ -458,6 +477,88 @@ class TestExtractPrNumber:
 
     def test_url_with_trailing(self):
         assert ReviewerAgent._extract_pr_number("https://github.com/test/repo/pull/123/files") == 123
+
+
+class TestExtractFeedback:
+    def test_json_reason(self):
+        text = '```json\n{"verdict": "rejected", "reason": "Tests are failing: 3 errors in test_foo.py"}\n```'
+        assert "Tests are failing" in ReviewerAgent._extract_feedback(text)
+
+    def test_after_rejected_keyword(self):
+        text = "REJECTED: The fix does not handle the edge case where input is empty."
+        feedback = ReviewerAgent._extract_feedback(text)
+        assert "edge case" in feedback
+
+    def test_reason_block(self):
+        text = "Reason: Missing test coverage for the error path\nSuggestions:\n- Add test for empty input"
+        feedback = ReviewerAgent._extract_feedback(text)
+        assert "Missing test coverage" in feedback
+
+    def test_empty_text(self):
+        assert ReviewerAgent._extract_feedback("") == ""
+
+    def test_no_feedback_found(self):
+        assert ReviewerAgent._extract_feedback("some random text") == ""
+
+    def test_truncates_long_feedback(self):
+        text = "REJECTED: " + "x" * 2000
+        feedback = ReviewerAgent._extract_feedback(text)
+        assert len(feedback) <= 1000
+
+
+class TestBuildRejectionComment:
+    def test_with_feedback(self):
+        comment = ReviewerAgent._build_rejection_comment("Tests failing in test_foo.py")
+        assert "**Review: REJECTED**" in comment
+        assert "Tests failing" in comment
+
+    def test_without_feedback(self):
+        comment = ReviewerAgent._build_rejection_comment("")
+        assert "**Review: REJECTED**" in comment
+        assert "did not provide specific feedback" in comment
+
+
+class TestRejectionCommentPosted:
+    """Verify that rejection feedback is posted to GitHub issues."""
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+        ), runner, github
+
+    def test_rejection_posts_feedback_to_issue(self, tmp_path):
+        agent, runner, github = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "REJECTED: Missing regression test for the null input case"}}],
+        )
+        issues = [{"number": 42, "title": "Bug", "body": "x"}]
+        agent.run("/tmp", issues=issues)
+
+        github.add_comment.assert_called_once()
+        comment = github.add_comment.call_args[0][1]
+        assert "**Review: REJECTED**" in comment
+        assert "regression test" in comment
+
+    def test_rejection_without_feedback_posts_generic(self, tmp_path):
+        agent, runner, github = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "REJECTED"}}],
+        )
+        issues = [{"number": 42, "title": "Bug", "body": "x"}]
+        agent.run("/tmp", issues=issues)
+
+        github.add_comment.assert_called_once()
+        comment = github.add_comment.call_args[0][1]
+        assert "**Review: REJECTED**" in comment
 
 
 class TestSelfImprovementGuard:

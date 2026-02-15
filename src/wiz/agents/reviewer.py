@@ -139,7 +139,7 @@ If the fix is inadequate:
                     continue
 
                 # Check events/output for APPROVED/REJECTED
-                approved = self._check_approval(result)
+                approved, feedback = self._check_approval(result)
                 logger.info(
                     "Issue #%d review verdict: %s",
                     number, "APPROVED" if approved else "REJECTED",
@@ -223,7 +223,8 @@ If the fix is inadequate:
                 else:
                     # Reject: send back with feedback
                     cycle = self.loop_tracker.record_cycle(number, "Review rejected")
-                    self.github.add_comment(number, "Review rejected: fix needs improvement")
+                    comment = self._build_rejection_comment(feedback)
+                    self.github.add_comment(number, comment)
                     self.github.update_labels(
                         number, add=["needs-fix"], remove=["needs-review"]
                     )
@@ -240,8 +241,11 @@ If the fix is inadequate:
 
         return {"reviews": len(results), "results": results}
 
-    def _check_approval(self, result: SessionResult) -> bool:
+    def _check_approval(self, result: SessionResult) -> tuple[bool, str]:
         """Check if the review approved the fix.
+
+        Returns (approved, feedback) where feedback is the reviewer's
+        explanation text (useful for rejection comments on the issue).
 
         Strategy (in priority order):
         1. Look for structured JSON verdict: {"verdict": "approved"/"rejected"}
@@ -249,12 +253,13 @@ If the fix is inadequate:
         3. Fall back to result.success
         """
         all_text = self._collect_event_text(result)
+        feedback = self._extract_feedback(all_text)
 
         # 1. Try structured JSON verdict
         verdict = self._parse_json_verdict(all_text)
         if verdict is not None:
             logger.debug("Verdict from JSON: %s", verdict)
-            return verdict
+            return verdict, feedback
 
         # 2. Keyword scan on events (more targeted than full text)
         for event in result.events:
@@ -264,17 +269,17 @@ If the fix is inadequate:
             for chunk in (response, text):
                 kw = self._keyword_verdict(chunk)
                 if kw is not None:
-                    return kw
+                    return kw, feedback
 
         # 3. Keyword scan on full collected text
         kw = self._keyword_verdict(all_text)
         if kw is not None:
             logger.debug("Verdict from keyword scan: %s", kw)
-            return kw
+            return kw, feedback
 
         # 4. Fallback
         logger.debug("No explicit verdict found, falling back to result.success=%s", result.success)
-        return result.success
+        return result.success, feedback
 
     @staticmethod
     def _collect_event_text(result: SessionResult) -> str:
@@ -329,6 +334,63 @@ If the fix is inadequate:
         if re.search(r"\bAPPROVED\b", upper):
             return True
         return None
+
+    @staticmethod
+    def _extract_feedback(text: str) -> str:
+        """Extract the reviewer's feedback/reasoning from the output text.
+
+        Looks for text after REJECTED keyword, structured reason blocks,
+        or falls back to the last substantial paragraph.
+        """
+        if not text:
+            return ""
+
+        # 1. Try structured JSON feedback: {"verdict": "rejected", "reason": "..."}
+        pattern = r"```json\s*(\{.*?\})\s*```"
+        for match in re.finditer(pattern, text, re.DOTALL):
+            try:
+                obj = json.loads(match.group(1))
+                if isinstance(obj, dict):
+                    reason = obj.get("reason", obj.get("feedback", ""))
+                    if reason:
+                        return reason.strip()
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+        # 2. Look for text after "REJECTED" keyword
+        rejected_match = re.search(
+            r"\bREJECTED\b[:\s]*(.+)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if rejected_match:
+            after = rejected_match.group(1).strip()
+            # Take up to ~1000 chars of feedback
+            if after:
+                return after[:1000].strip()
+
+        # 3. Look for "Reason:" or "Suggestions:" blocks
+        reason_match = re.search(
+            r"(?:Reason|Suggestions?|Feedback|Issues?)[:\s]*(.+)",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if reason_match:
+            return reason_match.group(1)[:1000].strip()
+
+        return ""
+
+    @staticmethod
+    def _build_rejection_comment(feedback: str) -> str:
+        """Build a GitHub comment for a rejection with reviewer feedback."""
+        if not feedback:
+            return (
+                "**Review: REJECTED**\n\n"
+                "The reviewer did not provide specific feedback. "
+                "Please check the branch for test failures and ensure "
+                "all tests pass before resubmitting."
+            )
+        return f"**Review: REJECTED**\n\n{feedback}"
 
     @staticmethod
     def _extract_pr_number(pr_url: str) -> int | None:

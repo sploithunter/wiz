@@ -101,12 +101,26 @@ class BugFixerAgent(BaseAgent):
         body = issue.get("body", "No description")
         number = issue.get("number", 0)
 
-        return f"""{instructions}
+        # Check if this is a retry (needs-fix label = sent back from reviewer)
+        reviewer_feedback = self._get_reviewer_feedback(issue)
+
+        prompt = f"""{instructions}
 
 ## Issue #{number}: {title}
 
 {body}
+"""
+        if reviewer_feedback:
+            prompt += f"""
+## Previous Review Feedback
+The reviewer rejected the previous fix attempt. You MUST address the following feedback:
 
+{reviewer_feedback}
+
+Pay close attention to this feedback. The fix was rejected for specific reasons — do not repeat the same mistakes.
+"""
+
+        prompt += f"""
 ## Task
 1. Read the issue and understand the bug
 2. Implement a fix
@@ -114,6 +128,37 @@ class BugFixerAgent(BaseAgent):
 4. Run the full test suite to ensure no regressions
 5. Commit all changes with a descriptive message referencing issue #{number}
 """
+        return prompt
+
+    def _get_reviewer_feedback(self, issue: dict) -> str:
+        """Extract reviewer feedback from issue comments if this is a retry.
+
+        Only returns feedback when the issue has a needs-fix label,
+        indicating it was sent back from review.
+        """
+        labels = issue.get("labels", [])
+        label_names = {
+            (l.get("name", "") if isinstance(l, dict) else str(l)).lower()
+            for l in labels
+        }
+        if "needs-fix" not in label_names:
+            return ""
+
+        number = issue.get("number", 0)
+        if not number:
+            return ""
+
+        try:
+            comments = self.github.get_comments(number, last_n=3)
+            # Find the most recent review rejection comment
+            for comment in reversed(comments):
+                body = comment.get("body", "")
+                if "Review: REJECTED" in body or "Review rejected" in body:
+                    return body
+            return ""
+        except Exception:
+            logger.debug("Could not fetch reviewer feedback for issue #%d", number)
+            return ""
 
     def process_result(self, result: SessionResult, **kwargs: Any) -> dict[str, Any]:
         """Process fix result."""
