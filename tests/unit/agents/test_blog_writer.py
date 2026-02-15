@@ -6,10 +6,12 @@ from unittest.mock import MagicMock, patch
 from wiz.agents.blog_writer import (
     PROPOSED_TOPIC_KEY,
     BlogWriterAgent,
+    gather_github_activity,
+    gather_session_log_context,
 )
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
-from wiz.config.schema import BlogWriterConfig
+from wiz.config.schema import BlogContextConfig, BlogWriterConfig, RepoConfig
 from wiz.memory.long_term import LongTermMemory
 
 
@@ -314,3 +316,145 @@ class TestGetPendingTopic:
         memory.retrieve.return_value = [("other-key", "some content")]
         agent = BlogWriterAgent(runner, BlogWriterConfig(), memory=memory)
         assert agent._get_pending_topic() is None
+
+
+class TestGatherSessionLogContext:
+    def test_returns_empty_for_missing_dir(self, tmp_path):
+        result = gather_session_log_context(tmp_path / "nonexistent")
+        assert result == ""
+
+    def test_returns_empty_for_empty_dir(self, tmp_path):
+        log_dir = tmp_path / "sessions"
+        log_dir.mkdir()
+        result = gather_session_log_context(log_dir)
+        assert result == ""
+
+    def test_reads_session_logs(self, tmp_path):
+        log_dir = tmp_path / "sessions"
+        log_dir.mkdir()
+        log1 = log_dir / "session_20260101_120000_dev.log"
+        log1.write_text("[2026-01-01 12:00:00] Session started: dev\n[2026-01-01 12:05:00] Fixed bug #42\n")
+
+        result = gather_session_log_context(log_dir)
+        assert "session_20260101_120000_dev.log" in result
+        assert "Fixed bug #42" in result
+
+    def test_limits_number_of_files(self, tmp_path):
+        log_dir = tmp_path / "sessions"
+        log_dir.mkdir()
+        for i in range(10):
+            f = log_dir / f"session_20260101_{i:06d}.log"
+            f.write_text(f"[2026-01-01] Session {i}\n")
+
+        result = gather_session_log_context(log_dir, max_files=3)
+        # Should only include 3 most recent files
+        assert result.count("###") == 3
+
+
+class TestGatherGitHubActivity:
+    @patch("wiz.agents.blog_writer.subprocess.run")
+    def test_fetches_issues_for_enabled_repos(self, mock_run):
+        import json
+        mock_run.return_value = MagicMock(
+            stdout=json.dumps([
+                {"number": 1, "title": "Add feature", "state": "OPEN", "updatedAt": "2026-01-01", "labels": []},
+            ]),
+            returncode=0,
+        )
+
+        repos = [RepoConfig(name="wiz", path="/tmp/wiz", github="sploithunter/wiz")]
+        result = gather_github_activity(repos, exclude_repos=[], limit=5)
+        assert "sploithunter/wiz" in result
+        assert "Add feature" in result
+
+    @patch("wiz.agents.blog_writer.subprocess.run")
+    def test_excludes_repos_by_github_name(self, mock_run):
+        repos = [RepoConfig(name="wiz", path="/tmp/wiz", github="sploithunter/wiz")]
+        result = gather_github_activity(repos, exclude_repos=["sploithunter/wiz"], limit=5)
+        assert result == ""
+        mock_run.assert_not_called()
+
+    @patch("wiz.agents.blog_writer.subprocess.run")
+    def test_excludes_repos_by_short_name(self, mock_run):
+        repos = [RepoConfig(name="wiz", path="/tmp/wiz", github="sploithunter/wiz")]
+        result = gather_github_activity(repos, exclude_repos=["wiz"], limit=5)
+        assert result == ""
+        mock_run.assert_not_called()
+
+    @patch("wiz.agents.blog_writer.subprocess.run")
+    def test_skips_disabled_repos(self, mock_run):
+        repos = [RepoConfig(name="wiz", path="/tmp/wiz", github="sploithunter/wiz", enabled=False)]
+        result = gather_github_activity(repos, exclude_repos=[], limit=5)
+        assert result == ""
+        mock_run.assert_not_called()
+
+    @patch("wiz.agents.blog_writer.subprocess.run")
+    def test_handles_gh_failure_gracefully(self, mock_run):
+        import subprocess as sp
+        mock_run.side_effect = sp.CalledProcessError(1, "gh")
+
+        repos = [RepoConfig(name="wiz", path="/tmp/wiz", github="sploithunter/wiz")]
+        result = gather_github_activity(repos, exclude_repos=[], limit=5)
+        assert result == ""
+
+
+class TestBlogWriterActivityContext:
+    def test_prompt_includes_session_log_context(self, tmp_path):
+        # Create a session log
+        log_dir = tmp_path / "memory" / "sessions"
+        log_dir.mkdir(parents=True)
+        (log_dir / "session_20260101_120000.log").write_text(
+            "[2026-01-01 12:00:00] Fixed critical auth bug\n"
+        )
+
+        config = BlogWriterConfig(
+            context_sources=BlogContextConfig(session_logs=True, github_activity=False),
+        )
+        runner = MagicMock(spec=SessionRunner)
+        agent = BlogWriterAgent(runner, config)
+
+        # Patch the session log dir to point to our tmp dir
+        with patch("wiz.agents.blog_writer.gather_session_log_context") as mock_logs:
+            mock_logs.return_value = "Fixed critical auth bug"
+            prompt = agent.build_prompt(mode="propose")
+            assert "Fixed critical auth bug" in prompt
+
+    def test_prompt_includes_github_activity(self):
+        config = BlogWriterConfig(
+            context_sources=BlogContextConfig(session_logs=False, github_activity=True),
+        )
+        repos = [RepoConfig(name="wiz", path="/tmp", github="sploithunter/wiz")]
+        runner = MagicMock(spec=SessionRunner)
+        agent = BlogWriterAgent(runner, config, repos=repos)
+
+        with patch("wiz.agents.blog_writer.gather_github_activity") as mock_gh:
+            mock_gh.return_value = "### sploithunter/wiz — Recent Issues\n- #42 (OPEN) New feature"
+            prompt = agent.build_prompt(mode="propose")
+            assert "Recent GitHub Activity" in prompt
+            assert "New feature" in prompt
+
+    def test_prompt_excludes_disabled_sources(self):
+        config = BlogWriterConfig(
+            context_sources=BlogContextConfig(session_logs=False, github_activity=False),
+        )
+        runner = MagicMock(spec=SessionRunner)
+        agent = BlogWriterAgent(runner, config)
+
+        with patch("wiz.agents.blog_writer.gather_session_log_context") as mock_logs, \
+             patch("wiz.agents.blog_writer.gather_github_activity") as mock_gh:
+            prompt = agent.build_prompt(mode="propose")
+            mock_logs.assert_not_called()
+            mock_gh.assert_not_called()
+            assert "Recent Wiz Session Activity" not in prompt
+            assert "Recent GitHub Activity" not in prompt
+
+    def test_repos_stored_on_agent(self):
+        repos = [RepoConfig(name="wiz", path="/tmp", github="sploithunter/wiz")]
+        runner = MagicMock(spec=SessionRunner)
+        agent = BlogWriterAgent(runner, BlogWriterConfig(), repos=repos)
+        assert agent.repos == repos
+
+    def test_repos_defaults_to_empty(self):
+        runner = MagicMock(spec=SessionRunner)
+        agent = BlogWriterAgent(runner, BlogWriterConfig())
+        assert agent.repos == []

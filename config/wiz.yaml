@@ -69,6 +69,11 @@ agents:
     require_approval: true
     output_dir: "~/Documents/blog-drafts"
     session_timeout: 600
+    context_sources:
+      session_logs: true         # Pull from Wiz session logs
+      github_activity: true      # Pull recent issues/comments from repos
+      github_activity_limit: 10  # Max items per repo
+      exclude_repos: []          # Repos to never expose publicly (e.g., "sploithunter/private-project")
     flags: ["--chrome"]
 
   social_manager:

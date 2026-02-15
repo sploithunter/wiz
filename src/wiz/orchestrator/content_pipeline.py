@@ -43,7 +43,10 @@ class ContentCyclePipeline:
             logger.info("=== content: blog_write ===")
             phase_start = time.time()
             runner = self._create_runner()
-            blog = BlogWriterAgent(runner, self.config.agents.blog_writer, memory, google_docs)
+            blog = BlogWriterAgent(
+                runner, self.config.agents.blog_writer, memory, google_docs,
+                repos=self.config.repos,
+            )
             result = blog.run(".", timeout=self.config.agents.blog_writer.session_timeout)
             logger.info("=== content: blog_write completed (%.1fs) ===", time.time() - phase_start)
             state.add_phase("blog_write", result.get("success", False), result)

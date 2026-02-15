@@ -116,3 +116,27 @@ class TestContentCyclePipeline:
         # Passed to SocialManagerAgent
         social_args = mock_social.call_args[0]
         assert social_args[4] == gdocs_instance  # 5th positional arg
+
+    @patch("wiz.orchestrator.content_pipeline.GoogleDocsClient")
+    @patch("wiz.orchestrator.content_pipeline.TypefullyClient")
+    @patch("wiz.orchestrator.content_pipeline.SocialManagerAgent")
+    @patch("wiz.orchestrator.content_pipeline.BlogWriterAgent")
+    @patch("wiz.orchestrator.content_pipeline.SessionRunner")
+    @patch("wiz.orchestrator.content_pipeline.BridgeClient")
+    @patch("wiz.orchestrator.content_pipeline.BridgeEventMonitor")
+    def test_repos_passed_to_blog_writer(
+        self, mock_monitor, mock_client, mock_runner,
+        mock_blog, mock_social, mock_typefully, mock_gdocs,
+    ):
+        config = WizConfig()
+        pipeline = ContentCyclePipeline(config)
+
+        mock_blog.return_value = MagicMock()
+        mock_blog.return_value.run.return_value = {"success": True}
+        mock_social.return_value = MagicMock()
+        mock_social.return_value.run.return_value = {"success": True}
+
+        pipeline.run()
+
+        blog_kwargs = mock_blog.call_args[1]
+        assert blog_kwargs["repos"] == config.repos

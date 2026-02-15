@@ -55,12 +55,20 @@ class FeatureProposerConfig(BaseModel):
     flags: list[str] = Field(default_factory=list)
 
 
+class BlogContextConfig(BaseModel):
+    session_logs: bool = True
+    github_activity: bool = True
+    github_activity_limit: int = 10
+    exclude_repos: list[str] = Field(default_factory=list)
+
+
 class BlogWriterConfig(BaseModel):
     model: str = "claude"
     auto_propose_topics: bool = True
     require_approval: bool = True
     output_dir: str = "~/Documents/blog-drafts"
     session_timeout: int = 600
+    context_sources: BlogContextConfig = Field(default_factory=BlogContextConfig)
     flags: list[str] = Field(default_factory=list)
 
 
