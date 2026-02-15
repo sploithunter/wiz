@@ -29,7 +29,8 @@ class TestReviewerAgent:
             repo_name="test/repo", self_improve=self_improve,
         ), runner, github, prs, notifier
 
-    def test_approval_path(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_approval_path(self, _mock_files, tmp_path: Path):
         """Approved fix -> PR created, issue closed."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         # Return result with APPROVED in events
@@ -146,7 +147,8 @@ class TestReviewerAgent:
         result = agent.run("/tmp", issues=issues)
         assert result["reviews"] == 2
 
-    def test_distributed_lock_skipped_when_none(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_distributed_lock_skipped_when_none(self, _mock_files, tmp_path: Path):
         """No distributed_locks means no distributed locking."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         assert agent.distributed_locks is None
