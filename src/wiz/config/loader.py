@@ -18,7 +18,7 @@ def load_config(path: Path | str | None = None) -> WizConfig:
     if path is None:
         return WizConfig()
 
-    path = Path(path)
+    path = Path(path).expanduser().resolve()
     if not path.exists():
         return WizConfig()
 

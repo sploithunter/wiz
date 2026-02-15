@@ -40,6 +40,19 @@ class TestLoadConfig:
         assert cfg.repos[0].self_improve is True
         assert cfg.agents.bug_hunter.model == "codex"
 
+    def test_tilde_path_is_expanded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """Regression test for #59: ~ in --config path must be expanded."""
+        fake_home = tmp_path / "fakehome"
+        config_dir = fake_home / ".config" / "wiz"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "wiz.yaml"
+        config_file.write_text(
+            'global:\n  coding_agent_bridge_url: "http://example.com"\n'
+        )
+        monkeypatch.setenv("HOME", str(fake_home))
+        cfg = load_config("~/.config/wiz/wiz.yaml")
+        assert cfg.global_.coding_agent_bridge_url == "http://example.com"
+
     def test_overrides(self, tmp_path: Path):
         config = tmp_path / "custom.yaml"
         config.write_text(
