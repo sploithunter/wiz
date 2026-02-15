@@ -47,6 +47,28 @@ class TestReviewerAgent:
         prs.create_pr.assert_called_once()
         github.close_issue.assert_called_once_with(1)
 
+    def test_pr_creation_failure_does_not_close_issue(self, tmp_path: Path):
+        """When PR creation fails (returns None), issue must NOT be closed."""
+        agent, runner, github, prs, notifier = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"type": "stop", "response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = None  # PR creation failed
+
+        issues = [{"number": 123, "title": "[P2] bug", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        # Issue must NOT be closed
+        github.close_issue.assert_not_called()
+        # A comment should be added explaining the failure
+        github.add_comment.assert_called_once()
+        assert "PR creation failed" in github.add_comment.call_args[0][1]
+        # Result should indicate PR failure
+        assert result["results"][0]["action"] == "pr_failed"
+        assert result["results"][0]["pr"] is None
+
     def test_rejection_path(self, tmp_path: Path):
         """Rejected fix -> labels updated, comment added."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
