@@ -29,7 +29,8 @@ class TestReviewerAgent:
             repo_name="test/repo", self_improve=self_improve,
         ), runner, github, prs, notifier
 
-    def test_approval_path(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_approval_path(self, mock_files, tmp_path: Path):
         """Approved fix -> PR created, issue closed."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         # Return result with APPROVED in events
@@ -146,7 +147,8 @@ class TestReviewerAgent:
         result = agent.run("/tmp", issues=issues)
         assert result["reviews"] == 2
 
-    def test_distributed_lock_skipped_when_none(self, tmp_path: Path):
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_distributed_lock_skipped_when_none(self, mock_files, tmp_path: Path):
         """No distributed_locks means no distributed locking."""
         agent, runner, github, prs, notifier = self._make_agent(tmp_path)
         assert agent.distributed_locks is None
@@ -447,6 +449,49 @@ class TestAutoMerge:
 
         assert result["results"][0]["merged"] is False
         github.close_issue.assert_called_once_with(5)
+
+
+class TestGetBranchFilesDefaultBranch:
+    """Regression test for issue #42: _get_branch_files should use detected default branch."""
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+            repo_name="test/repo",
+        ), prs
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_get_branch_files_uses_detected_default_branch(self, mock_run, tmp_path):
+        """_get_branch_files should diff against the detected default branch, not hardcoded 'main'."""
+        agent, prs = self._make_agent(tmp_path)
+        prs.get_default_branch.return_value = "master"
+        mock_run.return_value = MagicMock(stdout="src/fix.py\n", returncode=0)
+
+        files = agent._get_branch_files("fix/42")
+
+        cmd = mock_run.call_args[0][0]
+        assert "master...fix/42" in cmd, f"Expected 'master...fix/42' in git diff command, got {cmd}"
+        assert files == ["src/fix.py"]
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_get_branch_files_with_main_default(self, mock_run, tmp_path):
+        """When default branch is 'main', _get_branch_files should still work."""
+        agent, prs = self._make_agent(tmp_path)
+        prs.get_default_branch.return_value = "main"
+        mock_run.return_value = MagicMock(stdout="src/a.py\nsrc/b.py\n", returncode=0)
+
+        files = agent._get_branch_files("fix/99")
+
+        cmd = mock_run.call_args[0][0]
+        assert "main...fix/99" in cmd
+        assert files == ["src/a.py", "src/b.py"]
 
 
 class TestExtractPrNumber:

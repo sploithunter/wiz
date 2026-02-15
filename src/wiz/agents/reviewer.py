@@ -337,10 +337,11 @@ If the fix is inadequate:
         return int(match.group(1)) if match else None
 
     def _get_branch_files(self, branch: str) -> list[str]:
-        """Get list of files changed in the branch vs main."""
+        """Get list of files changed in the branch vs the default branch."""
+        base = self.prs.get_default_branch()
         try:
             result = subprocess.run(
-                ["git", "diff", "--name-only", f"main...{branch}"],
+                ["git", "diff", "--name-only", f"{base}...{branch}"],
                 capture_output=True, text=True, check=True, timeout=10,
             )
             return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
