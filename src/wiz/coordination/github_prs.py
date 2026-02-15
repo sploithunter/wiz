@@ -15,6 +15,7 @@ class GitHubPRs:
 
     def __init__(self, repo: str) -> None:
         self.repo = repo
+        self._default_branch: str | None = None
 
     def _run_gh(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
         cmd = ["gh"] + args + ["-R", self.repo]
@@ -26,14 +27,34 @@ class GitHubPRs:
             timeout=30,
         )
 
+    def get_default_branch(self) -> str:
+        """Return the repository's default branch, cached after first call."""
+        if self._default_branch is not None:
+            return self._default_branch
+        try:
+            result = self._run_gh([
+                "repo", "view",
+                "--json", "defaultBranchRef",
+                "-q", ".defaultBranchRef.name",
+            ])
+            branch = result.stdout.strip()
+            if branch:
+                self._default_branch = branch
+                return branch
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            logger.debug("Could not detect default branch for %s, falling back to 'main'", self.repo)
+        return "main"
+
     def create_pr(
         self,
         title: str,
         body: str,
         head: str,
-        base: str = "main",
+        base: str | None = None,
     ) -> str | None:
         """Create a PR. Returns PR URL or None."""
+        if base is None:
+            base = self.get_default_branch()
         args = [
             "pr", "create",
             "--title", title,
