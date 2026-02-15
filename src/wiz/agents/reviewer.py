@@ -146,6 +146,22 @@ If the fix is inadequate:
                 )
 
                 if approved:
+                    # Guard: don't create PR for empty branches
+                    changed_files = self._get_branch_files(branch)
+                    if not changed_files:
+                        logger.warning(
+                            "Issue #%d: branch %s has no changes, skipping PR",
+                            number, branch,
+                        )
+                        self.github.update_labels(
+                            number, add=["needs-fix"], remove=["needs-review"]
+                        )
+                        results.append({
+                            "issue": number, "action": "rejected",
+                            "reason": "empty-branch",
+                        })
+                        continue
+
                     # Create PR
                     pr_url = self.prs.create_pr(
                         title=f"fix: {issue.get('title', 'Bug fix')}",
@@ -239,8 +255,11 @@ If the fix is inadequate:
 
     @staticmethod
     def _collect_event_text(result: SessionResult) -> str:
-        """Collect all text from result events and reason."""
+        """Collect all text from result events, output, and reason."""
         chunks: list[str] = []
+        # Include direct output (e.g. codex exec stdout)
+        if result.output:
+            chunks.append(result.output)
         for event in result.events:
             data = event.get("data", {})
             for key in ("response", "message"):

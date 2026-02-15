@@ -273,6 +273,93 @@ class TestKeywordVerdict:
         assert ReviewerAgent._keyword_verdict("") is None
 
 
+class TestEmptyBranchGuard:
+    """Test that empty branches are rejected before PR creation."""
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+            repo_name="test/repo",
+        ), runner, github, prs
+
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=[])
+    def test_empty_branch_rejected(self, mock_files, tmp_path):
+        agent, runner, github, prs = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        issues = [{"number": 5, "title": "Bug", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["action"] == "rejected"
+        assert result["results"][0]["reason"] == "empty-branch"
+        prs.create_pr.assert_not_called()
+        github.close_issue.assert_not_called()
+        github.update_labels.assert_called_with(
+            5, add=["needs-fix"], remove=["needs-review"]
+        )
+
+    @patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"])
+    def test_non_empty_branch_proceeds(self, mock_files, tmp_path):
+        agent, runner, github, prs = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        prs.create_pr.return_value = "https://github.com/test/pull/1"
+        issues = [{"number": 5, "title": "Bug", "body": "x"}]
+        result = agent.run("/tmp", issues=issues)
+
+        assert result["results"][0]["action"] == "approved"
+        prs.create_pr.assert_called_once()
+
+
+class TestOutputFieldApproval:
+    """Test that codex stdout (result.output) is used for verdict parsing."""
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(runner, config, github, prs, loop_tracker, notifier)
+
+    def test_output_field_approved(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="completed", events=[],
+            output="Review complete. APPROVED - fix looks correct.",
+        )
+        assert agent._check_approval(result) is True
+
+    def test_output_field_rejected(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="completed", events=[],
+            output="REJECTED - no test coverage for edge cases.",
+        )
+        assert agent._check_approval(result) is False
+
+    def test_output_field_json_verdict(self, tmp_path):
+        agent = self._make_agent(tmp_path)
+        result = SessionResult(
+            success=True, reason="completed", events=[],
+            output='```json\n{"verdict": "rejected", "reason": "missing tests"}\n```',
+        )
+        assert agent._check_approval(result) is False
+
+
 class TestSelfImprovementGuard:
     def _make_agent(self, tmp_path, self_improve=True):
         runner = MagicMock(spec=SessionRunner)

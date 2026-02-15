@@ -202,6 +202,7 @@ class SessionRunner:
                 success=success,
                 reason="completed" if success else f"exit_code_{proc.returncode}",
                 elapsed=elapsed,
+                output=proc.stdout or "",
             )
 
         except subprocess.TimeoutExpired:

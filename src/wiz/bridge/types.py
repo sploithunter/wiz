@@ -64,3 +64,4 @@ class SessionResult:
     reason: str
     elapsed: float = 0.0
     events: list[dict[str, Any]] = field(default_factory=list)
+    output: str = ""
