@@ -316,22 +316,42 @@ class TestBlogWriterRun:
         assert result["success"] is True
         runner.run.assert_called_once()
 
-    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
-    def test_run_require_approval_still_allows_propose(self, _mock_img):
-        """When require_approval=True but no pending topic, propose still works."""
+    def test_run_require_approval_blocks_propose(self):
+        """When require_approval=True and no pending topic, propose is also blocked."""
         config = BlogWriterConfig(require_approval=True)
         agent, runner, memory = self._make_agent(config)
         memory.retrieve.return_value = []  # no pending topic
 
-        runner.run.return_value = SessionResult(
-            success=True,
-            reason="done",
-            events=[{"data": {"message": "Topic: Test"}}],
-        )
-
         result = agent.run("/tmp")
-        assert result["mode"] == "propose"
-        runner.run.assert_called_once()
+        assert result["skipped"] is True
+        assert result["reason"] == "awaiting_approval"
+        runner.run.assert_not_called()
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_require_approval_flag_changes_runner_call_count(self, _mock_img):
+        """Regression: require_approval must change whether runner is invoked.
+
+        Reproduces issue #54 PoC: with the same inputs (no pending topic),
+        require_approval=True must NOT call runner.run, while
+        require_approval=False DOES call runner.run.
+        """
+        # require_approval=False → runner is called
+        config_off = BlogWriterConfig(require_approval=False)
+        agent_off, runner_off, mem_off = self._make_agent(config_off)
+        mem_off.retrieve.return_value = []
+        runner_off.run.return_value = SessionResult(
+            success=True, reason="done",
+            events=[{"data": {"message": "Topic idea"}}],
+        )
+        agent_off.run("/tmp")
+        assert runner_off.run.call_count == 1
+
+        # require_approval=True → runner is NOT called
+        config_on = BlogWriterConfig(require_approval=True)
+        agent_on, runner_on, mem_on = self._make_agent(config_on)
+        mem_on.retrieve.return_value = []
+        agent_on.run("/tmp")
+        assert runner_on.run.call_count == 0
 
 
 class TestGetPendingTopic:

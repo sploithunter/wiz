@@ -279,6 +279,12 @@ Draw on the project activity context above where relevant.
             return self.process_result(result, mode="write", topic=pending_topic)
 
         elif self.blog_config.auto_propose_topics:
+            if self.blog_config.require_approval:
+                logger.info(
+                    "Topic proposal awaiting approval (require_approval=True)"
+                )
+                return {"skipped": True, "reason": "awaiting_approval"}
+
             # Propose mode: generate a topic for next run
             logger.info("No pending topic, running in propose mode")
             prompt = self.build_prompt(mode="propose")
