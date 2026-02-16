@@ -3,7 +3,7 @@
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
-from wiz.config.schema import DevCycleConfig, GlobalConfig, RepoConfig, WizConfig
+from wiz.config.schema import DevCycleConfig, GlobalConfig, RepoConfig, WorktreeConfig, WizConfig
 from wiz.notifications.telegram import TelegramNotifier
 from wiz.orchestrator.pipeline import DevCyclePipeline
 
@@ -156,3 +156,85 @@ class TestDevCyclePipeline:
 
         _, kwargs = mock_reviewer.call_args
         assert kwargs.get("self_improve") is False
+
+    @patch("wiz.orchestrator.pipeline.WorktreeManager")
+    @patch("wiz.orchestrator.pipeline.BugHunterAgent")
+    @patch("wiz.orchestrator.pipeline.SessionRunner")
+    @patch("wiz.orchestrator.pipeline.BridgeClient")
+    @patch("wiz.orchestrator.pipeline.BridgeEventMonitor")
+    def test_worktree_cleanup_called(
+        self, mock_monitor, mock_client, mock_runner, mock_hunter, mock_wt_cls
+    ):
+        """Regression test for #36: worktree cleanup must be invoked."""
+        config = WizConfig(
+            repos=[RepoConfig(name="demo", path="/tmp/demo", github="owner/repo")],
+            dev_cycle=DevCycleConfig(phases=["bug_hunt"]),
+            worktrees=WorktreeConfig(stale_days=3, auto_cleanup_merged=True),
+        )
+        notifier = MagicMock(spec=TelegramNotifier)
+        pipeline = DevCyclePipeline(config, notifier)
+
+        mock_wt = MagicMock()
+        mock_wt.cleanup_stale.return_value = 0
+        mock_wt.cleanup_merged.return_value = 0
+        mock_wt_cls.return_value = mock_wt
+        mock_hunter.return_value = MagicMock(run=MagicMock(return_value={"bugs_found": 0}))
+
+        pipeline.run_repo(config.repos[0])
+
+        mock_wt.cleanup_stale.assert_called_once_with(stale_days=3)
+        mock_wt.cleanup_merged.assert_called_once()
+
+    @patch("wiz.orchestrator.pipeline.WorktreeManager")
+    @patch("wiz.orchestrator.pipeline.BugHunterAgent")
+    @patch("wiz.orchestrator.pipeline.SessionRunner")
+    @patch("wiz.orchestrator.pipeline.BridgeClient")
+    @patch("wiz.orchestrator.pipeline.BridgeEventMonitor")
+    def test_worktree_cleanup_merged_skipped_when_disabled(
+        self, mock_monitor, mock_client, mock_runner, mock_hunter, mock_wt_cls
+    ):
+        """Regression test for #36: cleanup_merged not called when auto_cleanup_merged=False."""
+        config = WizConfig(
+            repos=[RepoConfig(name="demo", path="/tmp/demo", github="owner/repo")],
+            dev_cycle=DevCycleConfig(phases=["bug_hunt"]),
+            worktrees=WorktreeConfig(stale_days=7, auto_cleanup_merged=False),
+        )
+        notifier = MagicMock(spec=TelegramNotifier)
+        pipeline = DevCyclePipeline(config, notifier)
+
+        mock_wt = MagicMock()
+        mock_wt.cleanup_stale.return_value = 0
+        mock_wt_cls.return_value = mock_wt
+        mock_hunter.return_value = MagicMock(run=MagicMock(return_value={"bugs_found": 0}))
+
+        pipeline.run_repo(config.repos[0])
+
+        mock_wt.cleanup_stale.assert_called_once_with(stale_days=7)
+        mock_wt.cleanup_merged.assert_not_called()
+
+    @patch("wiz.orchestrator.pipeline.WorktreeManager")
+    @patch("wiz.orchestrator.pipeline.BugHunterAgent")
+    @patch("wiz.orchestrator.pipeline.SessionRunner")
+    @patch("wiz.orchestrator.pipeline.BridgeClient")
+    @patch("wiz.orchestrator.pipeline.BridgeEventMonitor")
+    def test_worktree_cleanup_failure_does_not_crash_pipeline(
+        self, mock_monitor, mock_client, mock_runner, mock_hunter, mock_wt_cls
+    ):
+        """Regression test for #36: cleanup errors must not crash the pipeline."""
+        config = WizConfig(
+            repos=[RepoConfig(name="demo", path="/tmp/demo", github="owner/repo")],
+            dev_cycle=DevCycleConfig(phases=["bug_hunt"]),
+            worktrees=WorktreeConfig(stale_days=7, auto_cleanup_merged=True),
+        )
+        notifier = MagicMock(spec=TelegramNotifier)
+        pipeline = DevCyclePipeline(config, notifier)
+
+        mock_wt = MagicMock()
+        mock_wt.cleanup_stale.side_effect = RuntimeError("git broke")
+        mock_wt.cleanup_merged.side_effect = RuntimeError("git broke again")
+        mock_wt_cls.return_value = mock_wt
+        mock_hunter.return_value = MagicMock(run=MagicMock(return_value={"bugs_found": 0}))
+
+        state = pipeline.run_repo(config.repos[0])
+        assert len(state.phases) == 1
+        assert state.phases[0].success is True

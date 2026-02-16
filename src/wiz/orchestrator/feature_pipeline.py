@@ -77,8 +77,29 @@ class FeatureCyclePipeline:
             logger.error("Feature cycle failed for %s: %s", repo.name, e, exc_info=True)
             state.add_phase("feature", False, {"error": str(e)}, time.time() - start)
 
+        # Worktree cleanup based on config
+        self._cleanup_worktrees(worktree)
+
         state.total_elapsed = time.time() - start
         return state
+
+    def _cleanup_worktrees(self, worktree: WorktreeManager) -> None:
+        """Run worktree cleanup based on config settings."""
+        wt_config = self.config.worktrees
+        try:
+            removed = worktree.cleanup_stale(stale_days=wt_config.stale_days)
+            if removed:
+                logger.info("Cleaned up %d stale worktrees", removed)
+        except Exception as e:
+            logger.warning("Stale worktree cleanup failed: %s", e)
+
+        if wt_config.auto_cleanup_merged:
+            try:
+                removed = worktree.cleanup_merged()
+                if removed:
+                    logger.info("Cleaned up %d merged worktrees", removed)
+            except Exception as e:
+                logger.warning("Merged worktree cleanup failed: %s", e)
 
     def run_all(self) -> list[CycleState]:
         """Run feature cycle for all enabled repos."""

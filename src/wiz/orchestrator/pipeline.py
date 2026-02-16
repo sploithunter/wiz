@@ -114,6 +114,9 @@ class DevCyclePipeline:
                 logger.error("Phase %s failed: %s", phase, e, exc_info=True)
                 state.add_phase(phase, False, {"error": str(e)}, phase_elapsed)
 
+        # Worktree cleanup based on config
+        self._cleanup_worktrees(worktree)
+
         state.total_elapsed = time.time() - start_time
         return state
 
@@ -126,6 +129,24 @@ class DevCyclePipeline:
             state = self.run_repo(repo, phases)
             results.append(state)
         return results
+
+    def _cleanup_worktrees(self, worktree: WorktreeManager) -> None:
+        """Run worktree cleanup based on config settings."""
+        wt_config = self.config.worktrees
+        try:
+            removed = worktree.cleanup_stale(stale_days=wt_config.stale_days)
+            if removed:
+                logger.info("Cleaned up %d stale worktrees", removed)
+        except Exception as e:
+            logger.warning("Stale worktree cleanup failed: %s", e)
+
+        if wt_config.auto_cleanup_merged:
+            try:
+                removed = worktree.cleanup_merged()
+                if removed:
+                    logger.info("Cleaned up %d merged worktrees", removed)
+            except Exception as e:
+                logger.warning("Merged worktree cleanup failed: %s", e)
 
     def _run_bug_hunt(
         self, repo: RepoConfig, github: GitHubIssues, timeout: float
