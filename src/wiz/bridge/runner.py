@@ -69,11 +69,17 @@ def ensure_hooks(cwd: str | None = None) -> bool:
                     hooks[event_type] = [_HOOK_ENTRY]
                     changed = True
                 else:
+                    # Normalize legacy dict form to a list
+                    entries = hooks[event_type]
+                    if isinstance(entries, dict):
+                        entries = [entries]
+                        hooks[event_type] = entries
+                        changed = True
                     # Check if our hook script is already in the list
                     existing_cmds = [
                         h.get("hooks", [{}])[0].get("command", "")
-                        for h in hooks[event_type]
-                        if h.get("hooks")
+                        for h in entries
+                        if isinstance(h, dict) and h.get("hooks")
                     ]
                     if _HOOK_SCRIPT not in existing_cmds:
                         hooks[event_type].append(_HOOK_ENTRY)

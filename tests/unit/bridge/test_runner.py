@@ -348,6 +348,38 @@ class TestEnsureHooks:
         # Stop should still have exactly 1 entry (not duplicated)
         assert len(data["hooks"]["Stop"]) == 1
 
+    def test_normalizes_legacy_dict_hooks(self, tmp_path):
+        """Regression test for #90: dict-form hooks should be normalized to a list."""
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings = settings_dir / "settings.json"
+
+        hook_script = tmp_path / "hook.sh"
+        hook_script.write_text("#!/bin/bash\n")
+
+        hook_entry = {
+            "matcher": "*",
+            "hooks": [{"type": "command", "command": str(hook_script), "timeout": 5}],
+        }
+
+        # Legacy dict form (not wrapped in a list)
+        legacy = {"hooks": {"Stop": {"command": "echo legacy", "type": "command"}}}
+        settings.write_text(json.dumps(legacy))
+
+        with patch("wiz.bridge.runner._HOOK_SCRIPT", str(hook_script)), \
+             patch("wiz.bridge.runner._HOOK_ENTRY", hook_entry), \
+             patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
+            result = ensure_hooks()
+
+        assert result is True
+        data = json.loads(settings.read_text())
+        # Legacy dict should be normalized to a list
+        assert isinstance(data["hooks"]["Stop"], list)
+        # Should contain the original legacy entry plus our hook entry
+        assert len(data["hooks"]["Stop"]) == 2
+        assert data["hooks"]["Stop"][0] == {"command": "echo legacy", "type": "command"}
+        assert data["hooks"]["Stop"][1]["hooks"][0]["command"] == str(hook_script)
+
     def test_returns_false_if_hook_script_missing(self, tmp_path):
         with patch("wiz.bridge.runner._HOOK_SCRIPT", str(tmp_path / "nonexistent.sh")), \
              patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
