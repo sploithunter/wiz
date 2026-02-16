@@ -148,7 +148,7 @@ If the fix is inadequate:
 
                 if approved:
                     # Guard: don't create PR for empty branches
-                    changed_files = self._get_branch_files(branch)
+                    changed_files = self._get_branch_files(branch, cwd=cwd)
                     if not changed_files:
                         logger.warning(
                             "Issue #%d: branch %s has no changes, skipping PR",
@@ -185,7 +185,7 @@ If the fix is inadequate:
                     # Check self-improvement guard for protected files
                     needs_human = False
                     if self.guard:
-                        changed_files = self._get_branch_files(branch)
+                        changed_files = self._get_branch_files(branch, cwd=cwd)
                         guard_result = self.guard.validate_changes(changed_files)
                         if guard_result["needs_human_review"]:
                             needs_human = True
@@ -399,11 +399,12 @@ If the fix is inadequate:
         match = re.search(r"/pull/(\d+)", pr_url)
         return int(match.group(1)) if match else None
 
-    def _get_branch_files(self, branch: str) -> list[str]:
+    def _get_branch_files(self, branch: str, cwd: str | None = None) -> list[str]:
         """Get list of files changed in the branch vs main."""
         try:
             result = subprocess.run(
                 ["git", "diff", "--name-only", f"main...{branch}"],
+                cwd=cwd or None,
                 capture_output=True, text=True, check=True, timeout=10,
             )
             return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]

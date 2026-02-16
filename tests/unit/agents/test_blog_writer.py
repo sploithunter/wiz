@@ -111,7 +111,7 @@ class TestBlogWriterRun:
 
     def _make_agent(self, config=None, with_memory=True):
         runner = MagicMock(spec=SessionRunner)
-        config = config or BlogWriterConfig()
+        config = config or BlogWriterConfig(require_approval=False)
         memory = MagicMock(spec=LongTermMemory) if with_memory else None
         if memory:
             memory.retrieve.return_value = []
@@ -271,7 +271,8 @@ class TestBlogWriterRun:
     @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
     def test_run_without_memory_defaults_to_propose(self, _mock_img):
         """Without memory, always runs in propose mode."""
-        agent, runner, _ = self._make_agent(with_memory=False)
+        config = BlogWriterConfig(require_approval=False)
+        agent, runner, _ = self._make_agent(config=config, with_memory=False)
         runner.run.return_value = SessionResult(success=True, reason="done")
 
         result = agent.run("/tmp")
@@ -484,7 +485,7 @@ class TestBlogWriterModelPassthrough:
 
     @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
     def test_model_passed_in_write_mode(self, _mock_img):
-        config = BlogWriterConfig(model="custom-model")
+        config = BlogWriterConfig(model="custom-model", require_approval=False)
         runner = MagicMock(spec=SessionRunner)
         memory = MagicMock(spec=LongTermMemory)
         memory.retrieve.return_value = [(PROPOSED_TOPIC_KEY, "Test topic")]
@@ -497,7 +498,7 @@ class TestBlogWriterModelPassthrough:
 
     @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
     def test_model_passed_in_propose_mode(self, _mock_img):
-        config = BlogWriterConfig(model="custom-model")
+        config = BlogWriterConfig(model="custom-model", require_approval=False)
         runner = MagicMock(spec=SessionRunner)
         memory = MagicMock(spec=LongTermMemory)
         memory.retrieve.return_value = []

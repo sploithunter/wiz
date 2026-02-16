@@ -13,14 +13,33 @@ class TestWorktreeManager:
 
     @patch("wiz.coordination.worktree.subprocess.run")
     def test_create(self, mock_run):
-        mock_run.return_value = MagicMock(returncode=0)
+        # First call: _branch_exists (rev-parse) → fails (branch doesn't exist)
+        # Second call: worktree add -b → succeeds
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(1, "git"),  # _branch_exists → False
+            MagicMock(returncode=0),  # worktree add -b
+        ]
         path = self.wt.create("fix", 42)
         assert path == Path("/tmp/repo/.worktrees/fix-42")
-        cmd = mock_run.call_args[0][0]
+        cmd = mock_run.call_args_list[1][0][0]
         assert "worktree" in cmd
         assert "add" in cmd
         assert "-b" in cmd
         assert "fix/42" in cmd
+
+    @patch("wiz.coordination.worktree.subprocess.run")
+    def test_create_existing_branch(self, mock_run):
+        """When the branch already exists, worktree add without -b."""
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # _branch_exists → True
+            MagicMock(returncode=0),  # worktree add (no -b)
+        ]
+        path = self.wt.create("fix", 42)
+        assert path == Path("/tmp/repo/.worktrees/fix-42")
+        cmd = mock_run.call_args_list[1][0][0]
+        assert "worktree" in cmd
+        assert "add" in cmd
+        assert "-b" not in cmd
 
     @patch("wiz.coordination.worktree.subprocess.run")
     def test_create_existing_returns_path(self, mock_run, tmp_path):

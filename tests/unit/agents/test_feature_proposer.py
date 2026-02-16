@@ -85,7 +85,7 @@ class TestFeatureProposerAgent:
         worktree.push.assert_called_once_with("feature", 5)
         github.update_labels.assert_not_called()
         assert result["success"] is False
-        assert result["reason"] == "push_failed"
+        assert result["results"][0]["reason"] == "push_failed"
 
     def test_backlog_not_empty_awaits_approval(self):
         agent, runner, github, _, _ = self._make_agent()
@@ -161,7 +161,7 @@ class TestRequireApproval:
         ]
         assert len(implemented_calls) == 0
         assert result["success"] is False
-        assert result["reason"] == "push_failed"
+        assert result["results"][0]["reason"] == "push_failed"
 
     def test_require_approval_false_labels_implemented_on_success(self):
         agent, runner, github, _, _ = self._make_agent(require_approval=False)

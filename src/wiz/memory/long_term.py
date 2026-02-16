@@ -10,7 +10,7 @@ class LongTermMemory:
     """Manages long-term memory via an index.md keyword->file map and topic files."""
 
     def __init__(self, base_dir: Path) -> None:
-        self.base_dir = Path(base_dir)
+        self.base_dir = Path(base_dir).expanduser()
         self.index_path = self.base_dir / "index.md"
         self.topics_dir = self.base_dir / "topics"
         self._index: dict[str, str] = {}
@@ -68,7 +68,7 @@ class LongTermMemory:
         self._index[keyword.lower()] = filename
 
     def delete_topic(self, keyword: str) -> bool:
-        """Remove a topic from index and delete its file."""
+        """Remove a topic from index, delete its file, and persist the index."""
         keyword_lower = keyword.lower()
         if keyword_lower not in self._index:
             return False
@@ -76,4 +76,5 @@ class LongTermMemory:
         topic_path = self.topics_dir / filename
         if topic_path.exists():
             topic_path.unlink()
+        self.save_index()
         return True

@@ -18,8 +18,8 @@ def load_config(path: Path | str | None = None) -> WizConfig:
     if path is None:
         return WizConfig()
 
-    path = Path(path)
-    if not path.exists():
+    path = Path(path).expanduser().resolve()
+    if not path.is_file():
         return WizConfig()
 
     text = path.read_text()

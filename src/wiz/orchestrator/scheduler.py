@@ -57,10 +57,12 @@ class LaunchdScheduler:
     def __init__(
         self,
         wiz_dir: Path,
+        config_path: Path | None = None,
         plist_dir: Path | None = None,
         log_dir: Path | None = None,
     ) -> None:
         self.wiz_dir = Path(wiz_dir)
+        self.config_path = Path(config_path).resolve() if config_path else None
         self.plist_dir = plist_dir or self.wiz_dir / "launchd"
         self.log_dir = log_dir or self.wiz_dir / "logs"
         self.script = self.wiz_dir / "scripts" / "wake.sh"
@@ -84,7 +86,10 @@ class LaunchdScheduler:
                     )
                 )
 
-        args = [str(self.script), cycle_type] + (extra_args or [])
+        args = [str(self.script), cycle_type]
+        if self.config_path:
+            args.extend(["--config", str(self.config_path)])
+        args.extend(extra_args or [])
         program_args = "\n".join(
             f"        <string>{a}</string>" for a in args
         )
@@ -140,6 +145,9 @@ class LaunchdScheduler:
 
     def install(self, label: str, plist_content: str) -> bool:
         """Write plist and load via launchctl."""
+        if not self.script.exists():
+            logger.error("Wake script not found: %s", self.script)
+            return False
         self.plist_dir.mkdir(parents=True, exist_ok=True)
         plist_path = self.plist_dir / f"{label}.plist"
         plist_path.write_text(plist_content)

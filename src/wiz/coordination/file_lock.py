@@ -72,7 +72,9 @@ class FileLockManager:
             if data.get("owner") != owner:
                 return False
         except (json.JSONDecodeError, KeyError):
-            pass
+            # Malformed lock file — refuse to release without ownership proof
+            logger.warning("Malformed lock file for %s, refusing release", file_path)
+            return False
 
         lock_file.unlink()
         logger.debug("Lock released on %s by %s", file_path, owner)

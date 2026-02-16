@@ -160,6 +160,9 @@ class BlogWriterAgent(BaseAgent):
         full_text = "\n".join(text_chunks)
 
         if not full_text.strip():
+            full_text = result.output or ""
+
+        if not full_text.strip():
             full_text = result.reason or ""
 
         if full_text.strip():
@@ -251,6 +254,16 @@ Draw on the project activity context above where relevant.
         pending_topic = self._get_pending_topic()
 
         if pending_topic:
+            if self.blog_config.require_approval:
+                logger.info(
+                    "Pending topic awaiting approval (require_approval=True)"
+                )
+                return {
+                    "skipped": True,
+                    "reason": "awaiting_approval",
+                    "pending_topic": pending_topic,
+                }
+
             # Write mode: draft the pending topic
             logger.info("Found pending topic, switching to write mode")
             prompt = self.build_prompt(mode="write", topic=pending_topic)
@@ -270,6 +283,12 @@ Draw on the project activity context above where relevant.
             return self.process_result(result, mode="write", topic=pending_topic)
 
         elif self.blog_config.auto_propose_topics:
+            if self.blog_config.require_approval:
+                logger.info(
+                    "Topic proposal awaiting approval (require_approval=True)"
+                )
+                return {"skipped": True, "reason": "awaiting_approval"}
+
             # Propose mode: generate a topic for next run
             logger.info("No pending topic, running in propose mode")
             prompt = self.build_prompt(mode="propose")

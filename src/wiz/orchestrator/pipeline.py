@@ -103,8 +103,14 @@ class DevCyclePipeline:
                         distributed_locks=distributed_locks,
                     )
                 else:
-                    logger.warning("Unknown phase: %s", phase)
-                    result = {"skipped": True}
+                    valid_phases = ["bug_hunt", "bug_fix", "review"]
+                    logger.warning(
+                        "Unknown phase: %s (valid: %s)", phase, ", ".join(valid_phases)
+                    )
+                    result = {"skipped": True, "reason": f"unknown_phase: {phase}"}
+                    phase_elapsed = time.time() - phase_start
+                    state.add_phase(phase, False, result, phase_elapsed)
+                    continue
 
                 phase_elapsed = time.time() - phase_start
                 state.add_phase(phase, True, result, phase_elapsed)
@@ -114,8 +120,29 @@ class DevCyclePipeline:
                 logger.error("Phase %s failed: %s", phase, e, exc_info=True)
                 state.add_phase(phase, False, {"error": str(e)}, phase_elapsed)
 
+        # Worktree cleanup based on config
+        self._cleanup_worktrees(worktree)
+
         state.total_elapsed = time.time() - start_time
         return state
+
+    def _cleanup_worktrees(self, worktree: WorktreeManager) -> None:
+        """Run worktree cleanup based on config settings."""
+        wt_config = self.config.worktrees
+        try:
+            removed = worktree.cleanup_stale(stale_days=wt_config.stale_days)
+            if removed:
+                logger.info("Cleaned up %d stale worktrees", removed)
+        except Exception as e:
+            logger.warning("Stale worktree cleanup failed: %s", e)
+
+        if wt_config.auto_cleanup_merged:
+            try:
+                removed = worktree.cleanup_merged()
+                if removed:
+                    logger.info("Cleaned up %d merged worktrees", removed)
+            except Exception as e:
+                logger.warning("Merged worktree cleanup failed: %s", e)
 
     def run_all(self, phases: list[str] | None = None) -> list[CycleState]:
         """Run dev cycle for all enabled repos."""

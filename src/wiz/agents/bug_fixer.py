@@ -26,8 +26,80 @@ CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "bug-fi
 PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4"]
 
 
+def _get_base_branch(work_dir: str) -> str | None:
+    """Determine the base branch for a repository dynamically.
+
+    Tries the remote default branch first (origin/HEAD), then falls back
+    to finding the local branch closest to HEAD (fewest commits ahead).
+    """
+    try:
+        result = subprocess.run(
+            ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip().split("/")[-1]
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    # Fallback: find the local branch closest to HEAD by commit distance
+    try:
+        current = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if current.returncode != 0:
+            return None
+        current_branch = current.stdout.strip()
+
+        branches = subprocess.run(
+            ["git", "branch", "--format=%(refname:short)"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if branches.returncode != 0:
+            return None
+
+        other_branches = [
+            b.strip()
+            for b in branches.stdout.splitlines()
+            if b.strip() and b.strip() != current_branch
+        ]
+        if not other_branches:
+            return None
+
+        best_branch = None
+        best_count: int | None = None
+        for branch in other_branches:
+            count_result = subprocess.run(
+                ["git", "rev-list", "--count", f"{branch}..HEAD"],
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if count_result.returncode == 0 and count_result.stdout.strip():
+                count = int(count_result.stdout.strip())
+                if best_count is None or count < best_count:
+                    best_count = count
+                    best_branch = branch
+
+        return best_branch
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        pass
+    return None
+
+
 def _check_files_changed(work_dir: str) -> bool:
-    """Check if the branch has any changes vs main (committed or uncommitted)."""
+    """Check if the branch has any changes vs base (committed or uncommitted)."""
     try:
         # First check uncommitted changes against HEAD
         result = subprocess.run(
@@ -40,9 +112,9 @@ def _check_files_changed(work_dir: str) -> bool:
         if result.stdout.strip():
             return True
 
-        # Then check committed changes vs the base branch (main)
-        # This catches the case where Claude Code already committed the fix
-        for base in ("main", "master"):
+        # Determine the base branch dynamically
+        base = _get_base_branch(work_dir)
+        if base:
             result = subprocess.run(
                 ["git", "log", "--oneline", f"{base}..HEAD"],
                 cwd=work_dir,
@@ -52,6 +124,18 @@ def _check_files_changed(work_dir: str) -> bool:
             )
             if result.returncode == 0 and result.stdout.strip():
                 return True
+        else:
+            # Fallback: try common names
+            for candidate in ("main", "master"):
+                result = subprocess.run(
+                    ["git", "log", "--oneline", f"{candidate}..HEAD"],
+                    cwd=work_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    return True
 
         return False
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):

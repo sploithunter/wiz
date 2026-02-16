@@ -43,7 +43,7 @@ class SocialManagerAgent(BaseAgent):
         self.google_docs = google_docs
 
     def build_prompt(self, **kwargs: Any) -> str:
-        if self.social_config.social_posts_per_week == 0:
+        if self.social_config.social_posts_per_week <= 0:
             return ""
 
         instructions = ""
@@ -97,6 +97,10 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             if text:
                 text_chunks.append(text)
 
+        # Include session output (codex stores response text here)
+        if result.output:
+            text_chunks.append(result.output)
+
         full_text = "\n".join(text_chunks)
 
         # Also try the result reason as fallback (some setups put output there)
@@ -127,7 +131,7 @@ Create up to {self.social_config.social_posts_per_week} drafts.
         return {"success": result.success, "reason": result.reason}
 
     def run(self, cwd: str, timeout: float = 300, **kwargs: Any) -> dict[str, Any]:
-        if self.social_config.social_posts_per_week == 0:
+        if self.social_config.social_posts_per_week <= 0:
             return {"skipped": True, "reason": "disabled"}
 
         prompt = self.build_prompt(**kwargs)
@@ -143,6 +147,16 @@ Create up to {self.social_config.social_posts_per_week} drafts.
 
         # Parse Claude's JSON output and create Typefully drafts
         drafts_parsed = self._parse_posts_from_result(result)
+
+        # Enforce the weekly post cap
+        cap = max(self.social_config.social_posts_per_week, 0)
+        if len(drafts_parsed) > cap:
+            logger.info(
+                "Capping drafts from %d to %d (social_posts_per_week)",
+                len(drafts_parsed), cap,
+            )
+            drafts_parsed = drafts_parsed[:cap]
+
         draft_results: list[DraftResult] = []
         if drafts_parsed and self.typefully.enabled:
             draft_results = self._create_typefully_drafts(drafts_parsed)
