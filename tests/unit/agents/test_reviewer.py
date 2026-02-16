@@ -1,5 +1,6 @@
 """Tests for reviewer agent."""
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -618,3 +619,97 @@ class TestSelfImprovementGuard:
     def test_guard_created_when_self_improve_true(self, tmp_path):
         agent, _, _, _, _ = self._make_agent(tmp_path, self_improve=True)
         assert agent.guard is not None
+
+
+class TestResolveBaseBranch:
+    """Test base branch resolution (main vs master)."""
+
+    def test_resolves_main_when_present(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = ReviewerAgent._resolve_base_branch("/some/repo")
+            assert result == "main"
+            mock_run.assert_called_once()
+            assert mock_run.call_args[1]["cwd"] == "/some/repo"
+
+    def test_resolves_master_when_main_missing(self):
+        with patch("subprocess.run") as mock_run:
+            def side_effect(cmd, **kwargs):
+                if "main" in cmd:
+                    raise subprocess.CalledProcessError(1, cmd)
+                return MagicMock(returncode=0)
+            mock_run.side_effect = side_effect
+            result = ReviewerAgent._resolve_base_branch("/some/repo")
+            assert result == "master"
+
+    def test_falls_back_to_main_when_neither_exists(self):
+        with patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, [])):
+            result = ReviewerAgent._resolve_base_branch("/some/repo")
+            assert result == "main"
+
+    def test_passes_cwd_to_subprocess(self):
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            ReviewerAgent._resolve_base_branch("/my/repo/path")
+            assert mock_run.call_args[1]["cwd"] == "/my/repo/path"
+
+
+class TestGetBranchFilesCwd:
+    """Regression tests for issue #76: _get_branch_files must use cwd and resolve base branch."""
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+            repo_name="test/repo",
+        )
+
+    def test_passes_cwd_to_git_diff(self, tmp_path):
+        """_get_branch_files must pass cwd to subprocess.run."""
+        agent = self._make_agent(tmp_path)
+        with patch.object(ReviewerAgent, "_resolve_base_branch", return_value="main"), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="src/fix.py\n", returncode=0)
+            agent._get_branch_files("fix/42", cwd="/my/repo")
+            mock_run.assert_called_once()
+            assert mock_run.call_args[1]["cwd"] == "/my/repo"
+
+    def test_uses_resolved_base_branch(self, tmp_path):
+        """_get_branch_files must use the resolved base branch, not hardcoded main."""
+        agent = self._make_agent(tmp_path)
+        with patch.object(ReviewerAgent, "_resolve_base_branch", return_value="master"), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="src/fix.py\n", returncode=0)
+            agent._get_branch_files("fix/42", cwd="/my/repo")
+            cmd = mock_run.call_args[0][0]
+            assert "master...fix/42" in cmd
+
+    def test_master_based_repo_detects_changes(self, tmp_path):
+        """Regression: master-based repo must not falsely report empty branch (issue #76 PoC)."""
+        agent = self._make_agent(tmp_path)
+        with patch.object(ReviewerAgent, "_resolve_base_branch", return_value="master"), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(stdout="src/fix.py\ntests/test_fix.py\n", returncode=0)
+            files = agent._get_branch_files("fix/42", cwd="/repo/with/master")
+            assert files == ["src/fix.py", "tests/test_fix.py"]
+
+    def test_run_passes_cwd_to_get_branch_files(self, tmp_path):
+        """run() must forward its cwd argument to _get_branch_files."""
+        agent = self._make_agent(tmp_path)
+        runner = agent.runner
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        agent.prs.create_pr.return_value = "https://github.com/test/repo/pull/1"
+
+        with patch.object(agent, "_get_branch_files", return_value=["src/fix.py"]) as mock_gbf:
+            issues = [{"number": 42, "title": "Bug", "body": "x"}]
+            agent.run("/custom/repo/path", issues=issues)
+            mock_gbf.assert_called_with("fix/42", cwd="/custom/repo/path")

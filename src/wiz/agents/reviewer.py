@@ -147,7 +147,7 @@ If the fix is inadequate:
 
                 if approved:
                     # Guard: don't create PR for empty branches
-                    changed_files = self._get_branch_files(branch)
+                    changed_files = self._get_branch_files(branch, cwd=cwd)
                     if not changed_files:
                         logger.warning(
                             "Issue #%d: branch %s has no changes, skipping PR",
@@ -184,7 +184,7 @@ If the fix is inadequate:
                     # Check self-improvement guard for protected files
                     needs_human = False
                     if self.guard:
-                        changed_files = self._get_branch_files(branch)
+                        changed_files = self._get_branch_files(branch, cwd=cwd)
                         guard_result = self.guard.validate_changes(changed_files)
                         if guard_result["needs_human_review"]:
                             needs_human = True
@@ -398,12 +398,29 @@ If the fix is inadequate:
         match = re.search(r"/pull/(\d+)", pr_url)
         return int(match.group(1)) if match else None
 
-    def _get_branch_files(self, branch: str) -> list[str]:
-        """Get list of files changed in the branch vs main."""
+    @staticmethod
+    def _resolve_base_branch(cwd: str | None = None) -> str:
+        """Resolve the repository's base branch (main or master)."""
+        for candidate in ("main", "master"):
+            try:
+                subprocess.run(
+                    ["git", "rev-parse", "--verify", candidate],
+                    capture_output=True, check=True, timeout=5,
+                    cwd=cwd,
+                )
+                return candidate
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+                continue
+        return "main"
+
+    def _get_branch_files(self, branch: str, cwd: str | None = None) -> list[str]:
+        """Get list of files changed in the branch vs the base branch."""
+        base = self._resolve_base_branch(cwd)
         try:
             result = subprocess.run(
-                ["git", "diff", "--name-only", f"main...{branch}"],
+                ["git", "diff", "--name-only", f"{base}...{branch}"],
                 capture_output=True, text=True, check=True, timeout=10,
+                cwd=cwd,
             )
             return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
