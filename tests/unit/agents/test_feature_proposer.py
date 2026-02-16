@@ -82,7 +82,7 @@ class TestFeatureProposerAgent:
         worktree.push.assert_called_once_with("feature", 5)
         github.update_labels.assert_not_called()
         assert result["success"] is False
-        assert result["reason"] == "push_failed"
+        assert result["results"][0]["reason"] == "push_failed"
 
     def test_backlog_not_empty_awaits_approval(self):
         agent, runner, github, _, _ = self._make_agent()
@@ -158,7 +158,7 @@ class TestRequireApproval:
         ]
         assert len(implemented_calls) == 0
         assert result["success"] is False
-        assert result["reason"] == "push_failed"
+        assert result["results"][0]["reason"] == "push_failed"
 
     def test_require_approval_false_labels_implemented_on_success(self):
         agent, runner, github, _, _ = self._make_agent(require_approval=False)
@@ -171,6 +171,113 @@ class TestRequireApproval:
         label_calls = github.update_labels.call_args_list
         implemented_call = [c for c in label_calls if "feature-implemented" in c[1].get("add", c[0][1] if len(c[0]) > 1 else [])]
         assert len(implemented_call) >= 1
+
+
+class TestFeaturesPerRun:
+    """Regression tests for #28: features_per_run must be respected."""
+
+    def _make_agent(self, features_per_run, require_approval=False):
+        runner = MagicMock(spec=SessionRunner)
+        config = FeatureProposerConfig(
+            features_per_run=features_per_run,
+            require_approval=require_approval,
+        )
+        github = MagicMock(spec=GitHubIssues)
+        worktree = MagicMock(spec=WorktreeManager)
+        worktree.create.return_value = Path("/tmp/feature-wt")
+        notifier = MagicMock(spec=TelegramNotifier)
+        return FeatureProposerAgent(runner, config, github, worktree, notifier=notifier), runner, github, worktree, notifier
+
+    def test_implements_multiple_approved_features(self):
+        """features_per_run=2 should implement two approved issues, not just one."""
+        agent, runner, github, worktree, _ = self._make_agent(features_per_run=2)
+        approved = [
+            {"number": 1, "title": "A", "body": "a"},
+            {"number": 2, "title": "B", "body": "b"},
+        ]
+        github.list_issues.side_effect = [approved]
+        runner.run.return_value = SessionResult(success=True, reason="ok")
+
+        result = agent.run("/tmp")
+
+        assert worktree.create.call_count == 2
+        assert runner.run.call_count == 2
+        assert result["mode"] == "implement"
+        assert result["implemented"] == 2
+        assert result["success"] is True
+        assert len(result["results"]) == 2
+
+    def test_implements_multiple_candidates_when_auto_approved(self):
+        """features_per_run=2 with require_approval=False should implement two candidates."""
+        agent, runner, github, worktree, _ = self._make_agent(
+            features_per_run=2, require_approval=False,
+        )
+        candidates = [
+            {"number": 1, "title": "A", "body": "a", "url": "u1"},
+            {"number": 2, "title": "B", "body": "b", "url": "u2"},
+        ]
+        github.list_issues.side_effect = [
+            [],          # No approved
+            candidates,  # Candidates
+        ]
+        runner.run.return_value = SessionResult(success=True, reason="ok")
+
+        result = agent.run("/tmp")
+
+        assert worktree.create.call_count == 2
+        assert runner.run.call_count == 2
+        assert result["implemented"] == 2
+
+    def test_limits_to_features_per_run(self):
+        """Even with 3 approved issues, features_per_run=2 should only implement 2."""
+        agent, runner, github, worktree, _ = self._make_agent(features_per_run=2)
+        approved = [
+            {"number": 1, "title": "A", "body": "a"},
+            {"number": 2, "title": "B", "body": "b"},
+            {"number": 3, "title": "C", "body": "c"},
+        ]
+        github.list_issues.side_effect = [approved]
+        runner.run.return_value = SessionResult(success=True, reason="ok")
+
+        result = agent.run("/tmp")
+
+        assert worktree.create.call_count == 2
+        assert result["implemented"] == 2
+
+    def test_fills_remaining_capacity_from_candidates(self):
+        """1 approved + 1 candidate should both be implemented when features_per_run=2."""
+        agent, runner, github, worktree, _ = self._make_agent(
+            features_per_run=2, require_approval=False,
+        )
+        approved = [{"number": 1, "title": "A", "body": "a"}]
+        candidates = [{"number": 2, "title": "B", "body": "b", "url": "u2"}]
+        github.list_issues.side_effect = [approved, candidates]
+        runner.run.return_value = SessionResult(success=True, reason="ok")
+
+        result = agent.run("/tmp")
+
+        assert worktree.create.call_count == 2
+        assert result["implemented"] == 2
+
+    def test_partial_failure_reports_correctly(self):
+        """If one of two features fails, success should be False but both attempted."""
+        agent, runner, github, worktree, _ = self._make_agent(features_per_run=2)
+        approved = [
+            {"number": 1, "title": "A", "body": "a"},
+            {"number": 2, "title": "B", "body": "b"},
+        ]
+        github.list_issues.side_effect = [approved]
+        runner.run.side_effect = [
+            SessionResult(success=True, reason="ok"),
+            SessionResult(success=False, reason="timeout"),
+        ]
+
+        result = agent.run("/tmp")
+
+        assert result["implemented"] == 2
+        assert result["success"] is False
+        assert result["results"][0]["success"] is True
+        assert result["results"][1]["success"] is False
 
 
 class TestTelegramNotifications:

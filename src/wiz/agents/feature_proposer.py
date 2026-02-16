@@ -96,13 +96,47 @@ Commit all changes and ensure all tests pass.
             )
             logger.info("Auto-approved feature #%d (require_approval=False)", number)
 
+    def _implement_issue(
+        self, issue: dict[str, Any], timeout: float
+    ) -> dict[str, Any]:
+        """Implement a single approved issue. Returns a per-issue result dict."""
+        number = issue.get("number", 0)
+        wt_path = self.worktree.create("feature", number)
+
+        prompt = self.build_prompt(mode="implement", issue=issue)
+        result = self.runner.run(
+            name=f"wiz-feature-{number}",
+            cwd=str(wt_path),
+            prompt=prompt,
+            agent=self.agent_type,
+            timeout=timeout,
+            flags=self.fp_config.flags or None,
+        )
+
+        if result.success:
+            pushed = self.worktree.push("feature", number)
+            if pushed:
+                self.github.update_labels(
+                    number,
+                    add=["feature-implemented"],
+                    remove=["feature-approved"],
+                )
+            else:
+                logger.error(
+                    "Push failed for feature #%d; keeping feature-approved label",
+                    number,
+                )
+                return {"success": False, "reason": "push_failed", "mode": "implement"}
+
+        return self.process_result(result, mode="implement")
+
     def run(self, cwd: str, timeout: float = 900, **kwargs: Any) -> dict[str, Any]:
         """Run feature proposer with full propose→approve→implement workflow.
 
         Logic:
-        1. Check for feature-approved issues → implement the first one
-        2. Check for feature-candidate issues:
-           a. If require_approval=False → auto-approve them, then implement
+        1. Check for feature-approved issues → implement up to features_per_run
+        2. If capacity remains, check for feature-candidate issues:
+           a. If require_approval=False → auto-approve and implement up to remaining
            b. If require_approval=True → notify via Telegram, wait for human
         3. If no candidates and auto_propose_features → propose a new feature
         4. Otherwise → skip
@@ -110,81 +144,49 @@ Commit all changes and ensure all tests pass.
         if self.fp_config.features_per_run == 0:
             return {"skipped": True, "reason": "disabled"}
 
-        # Check for approved features
+        limit = self.fp_config.features_per_run
+        results: list[dict[str, Any]] = []
+
+        # Phase 1: Implement approved features
         approved = self.github.list_issues(labels=["feature-approved"])
 
-        if approved:
-            # Implementation mode
-            issue = approved[0]
-            number = issue.get("number", 0)
-            wt_path = self.worktree.create("feature", number)
+        for issue in approved[:limit]:
+            res = self._implement_issue(issue, timeout)
+            results.append(res)
 
-            prompt = self.build_prompt(mode="implement", issue=issue)
-            result = self.runner.run(
-                name=f"wiz-feature-{number}",
-                cwd=str(wt_path),
-                prompt=prompt,
-                agent=self.agent_type,
-                timeout=timeout,
-                flags=self.fp_config.flags or None,
-            )
+        remaining = limit - len(results)
 
-            if result.success:
-                pushed = self.worktree.push("feature", number)
-                if pushed:
-                    self.github.update_labels(
-                        number,
-                        add=["feature-implemented"],
-                        remove=["feature-approved"],
-                    )
-                else:
-                    logger.error("Push failed for feature #%d; keeping feature-approved label", number)
-                    return {"success": False, "reason": "push_failed", "mode": "implement"}
+        # Phase 2: Handle candidates if capacity remains
+        if remaining > 0:
+            candidates = self.github.list_issues(labels=["feature-candidate"])
 
-            return self.process_result(result, mode="implement")
+            if candidates and not self.fp_config.require_approval:
+                to_implement = candidates[:remaining]
+                self._auto_approve_candidates(to_implement)
+                for issue in to_implement:
+                    res = self._implement_issue(issue, timeout)
+                    results.append(res)
+            elif candidates:
+                self._notify_new_candidate(candidates)
+                if not results:
+                    return {
+                        "skipped": True,
+                        "reason": "awaiting_approval",
+                        "candidates": len(candidates),
+                    }
 
-        # Check for candidates awaiting approval
-        candidates = self.github.list_issues(labels=["feature-candidate"])
+        # Return aggregated results if any features were implemented
+        if results:
+            all_success = all(r.get("success", False) for r in results)
+            return {
+                "success": all_success,
+                "mode": "implement",
+                "results": results,
+                "implemented": len(results),
+            }
 
-        if candidates and not self.fp_config.require_approval:
-            # Auto-approve and implement immediately
-            self._auto_approve_candidates(candidates)
-            issue = candidates[0]
-            number = issue.get("number", 0)
-            wt_path = self.worktree.create("feature", number)
-
-            prompt = self.build_prompt(mode="implement", issue=issue)
-            result = self.runner.run(
-                name=f"wiz-feature-{number}",
-                cwd=str(wt_path),
-                prompt=prompt,
-                agent=self.agent_type,
-                timeout=timeout,
-                flags=self.fp_config.flags or None,
-            )
-
-            if result.success:
-                pushed = self.worktree.push("feature", number)
-                if pushed:
-                    self.github.update_labels(
-                        number,
-                        add=["feature-implemented"],
-                        remove=["feature-approved"],
-                    )
-                else:
-                    logger.error("Push failed for feature #%d; keeping feature-approved label", number)
-                    return {"success": False, "reason": "push_failed", "mode": "implement"}
-
-            return self.process_result(result, mode="implement")
-
-        if candidates:
-            # Candidates exist but require human approval — notify and wait
-            self._notify_new_candidate(candidates)
-            return {"skipped": True, "reason": "awaiting_approval",
-                    "candidates": len(candidates)}
-
+        # Phase 3: No features to implement — propose if enabled
         if self.fp_config.auto_propose_features:
-            # No candidates at all — propose a new feature
             prompt = self.build_prompt(mode="propose")
             result = self.runner.run(
                 name="wiz-feature-propose",
@@ -195,7 +197,6 @@ Commit all changes and ensure all tests pass.
                 flags=self.fp_config.flags or None,
             )
 
-            # Notify about new candidates after proposing
             if result.success:
                 new_candidates = self.github.list_issues(labels=["feature-candidate"])
                 if new_candidates:
