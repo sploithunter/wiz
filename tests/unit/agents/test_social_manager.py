@@ -284,6 +284,47 @@ class TestSocialManagerAgent:
         result = agent.run("/tmp")
         assert result["doc_urls"] == []
 
+    def test_negative_social_posts_per_week_treated_as_disabled(self):
+        """Edge-case: negative social_posts_per_week is treated as disabled."""
+        config = SocialManagerConfig(social_posts_per_week=-1)
+        agent, runner, _ = self._make_agent(config)
+        result = agent.run("/tmp")
+        assert result["skipped"] is True
+        assert result["reason"] == "disabled"
+        runner.run.assert_not_called()
+
+    def test_negative_social_posts_per_week_empty_prompt(self):
+        """Edge-case: negative social_posts_per_week produces empty prompt."""
+        config = SocialManagerConfig(social_posts_per_week=-1)
+        agent, _, _ = self._make_agent(config)
+        assert agent.build_prompt() == ""
+
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_cap_equal_to_drafts_does_not_truncate(self, _mock_img):
+        """When social_posts_per_week equals number of drafts, all are kept."""
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = True
+        typefully.create_draft.return_value = DraftResult(success=True, draft_id=1)
+
+        config = SocialManagerConfig(social_posts_per_week=3)
+        agent, runner, _ = self._make_agent(config, typefully=typefully)
+
+        json_output = "\n".join([
+            '```json\n{"draft_title":"a","posts":[{"text":"one"}]}\n```',
+            '```json\n{"draft_title":"b","posts":[{"text":"two"}]}\n```',
+            '```json\n{"draft_title":"c","posts":[{"text":"three"}]}\n```',
+        ])
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": json_output}}],
+        )
+
+        result = agent.run("/tmp")
+        assert result["drafts_parsed"] == 3
+        assert result["drafts_created"] == 3
+        assert typefully.create_draft.call_count == 3
+
 
 class TestExtractJsonBlocks:
     def test_single_block(self):

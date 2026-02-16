@@ -43,7 +43,7 @@ class SocialManagerAgent(BaseAgent):
         self.google_docs = google_docs
 
     def build_prompt(self, **kwargs: Any) -> str:
-        if self.social_config.social_posts_per_week == 0:
+        if self.social_config.social_posts_per_week <= 0:
             return ""
 
         instructions = ""
@@ -127,7 +127,7 @@ Create up to {self.social_config.social_posts_per_week} drafts.
         return {"success": result.success, "reason": result.reason}
 
     def run(self, cwd: str, timeout: float = 300, **kwargs: Any) -> dict[str, Any]:
-        if self.social_config.social_posts_per_week == 0:
+        if self.social_config.social_posts_per_week <= 0:
             return {"skipped": True, "reason": "disabled"}
 
         prompt = self.build_prompt(**kwargs)
@@ -143,7 +143,7 @@ Create up to {self.social_config.social_posts_per_week} drafts.
         drafts_parsed = self._parse_posts_from_result(result)
 
         # Enforce the weekly post cap — the LLM may produce more drafts than requested
-        cap = self.social_config.social_posts_per_week
+        cap = max(self.social_config.social_posts_per_week, 0)
         if len(drafts_parsed) > cap:
             logger.info(
                 "Capping drafts from %d to %d (social_posts_per_week)",
