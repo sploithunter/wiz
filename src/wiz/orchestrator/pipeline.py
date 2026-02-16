@@ -24,6 +24,7 @@ from wiz.coordination.github_prs import GitHubPRs
 from wiz.coordination.loop_tracker import LoopTracker
 from wiz.coordination.strikes import StrikeTracker
 from wiz.coordination.worktree import WorktreeManager
+from wiz.memory.rejection_journal import RejectionJournal
 from wiz.notifications.telegram import TelegramNotifier
 from wiz.orchestrator.state import CycleState
 
@@ -67,6 +68,9 @@ class DevCyclePipeline:
             strikes, self.config.agents.reviewer.max_review_cycles
         )
 
+        # Rejection journal for persistent learning
+        journal = RejectionJournal()
+
         # Distributed locking (multi-machine) — only when machine_id is configured
         distributed_locks: DistributedLockManager | None = None
         if self.config.global_.machine_id:
@@ -101,6 +105,7 @@ class DevCyclePipeline:
                     result = self._run_review(
                         repo, github, prs, loop_tracker, remaining,
                         distributed_locks=distributed_locks,
+                        rejection_journal=journal,
                     )
                 else:
                     valid_phases = ["bug_hunt", "bug_fix", "review"]
@@ -194,6 +199,7 @@ class DevCyclePipeline:
         loop_tracker: LoopTracker,
         timeout: float,
         distributed_locks: DistributedLockManager | None = None,
+        rejection_journal: RejectionJournal | None = None,
     ) -> dict[str, Any]:
         runner = self._create_runner()
         agent = ReviewerAgent(
@@ -206,6 +212,7 @@ class DevCyclePipeline:
             repo_name=repo.name,
             distributed_locks=distributed_locks,
             self_improve=repo.self_improve,
+            rejection_journal=rejection_journal,
         )
         return agent.run(
             repo.path,

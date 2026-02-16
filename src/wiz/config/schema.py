@@ -138,6 +138,15 @@ class EscalationConfig(BaseModel):
     strike_file: str = ".wiz/strikes.json"
 
 
+class RejectionLearnerConfig(BaseModel):
+    enabled: bool = False
+    min_rejections: int = 5
+    lookback_days: int = 7
+    target_agents: list[str] = Field(
+        default_factory=lambda: ["bug-fixer", "feature-proposer"]
+    )
+
+
 class MemoryConfig(BaseModel):
     short_term_max_lines: int = 50
     session_log_retention_days: int = 30
@@ -179,5 +188,8 @@ class WizConfig(BaseModel):
     testing: TestingConfig = Field(default_factory=TestingConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     google_docs: GoogleDocsConfig = Field(default_factory=GoogleDocsConfig)
+    rejection_learner: RejectionLearnerConfig = Field(
+        default_factory=RejectionLearnerConfig
+    )
 
     model_config = {"populate_by_name": True}

@@ -1,5 +1,6 @@
 """Tests for reviewer agent."""
 
+import unittest.mock
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,6 +13,7 @@ from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.github_prs import GitHubPRs
 from wiz.coordination.loop_tracker import LoopTracker
 from wiz.coordination.strikes import StrikeTracker
+from wiz.memory.rejection_journal import RejectionJournal
 from wiz.notifications.telegram import TelegramNotifier
 
 
@@ -643,3 +645,77 @@ class TestReviewerModelPassthrough:
         agent.run("/tmp", issues=issues)
 
         assert runner.run.call_args[1]["model"] == "custom-model"
+
+
+class TestRejectionJournalIntegration:
+    """Verify that rejection journal is called during review rejections."""
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        journal = MagicMock(spec=RejectionJournal)
+        agent = ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+            repo_name="test/repo", rejection_journal=journal,
+        )
+        return agent, runner, github, journal
+
+    def test_rejection_records_to_journal(self, tmp_path):
+        agent, runner, github, journal = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "REJECTED: Missing tests for edge case"}}],
+        )
+        issues = [{"number": 42, "title": "Bug", "body": "x"}]
+        agent.run("/tmp", issues=issues)
+
+        journal.record.assert_called_once_with(
+            repo="test/repo",
+            issue_number=42,
+            branch="fix/42",
+            feedback=unittest.mock.ANY,
+            agent="bug-fixer",
+        )
+
+    def test_no_journal_on_approval(self, tmp_path):
+        agent, runner, github, journal = self._make_agent(tmp_path)
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "APPROVED"}}],
+        )
+        # Need non-empty branch for approval path
+        with patch.object(ReviewerAgent, "_get_branch_files", return_value=["src/fix.py"]):
+            MagicMock(spec=GitHubPRs)
+            agent.prs.create_pr.return_value = "https://github.com/test/repo/pull/1"
+            issues = [{"number": 42, "title": "Bug", "body": "x"}]
+            agent.run("/tmp", issues=issues)
+
+        journal.record.assert_not_called()
+
+    def test_no_journal_when_none(self, tmp_path):
+        """No journal param means no crash on rejection."""
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        agent = ReviewerAgent(
+            runner, config, github, prs, loop_tracker, notifier,
+        )
+        assert agent.rejection_journal is None
+
+        runner.run.return_value = SessionResult(
+            success=True, reason="completed",
+            events=[{"data": {"response": "REJECTED: bad code"}}],
+        )
+        issues = [{"number": 1, "title": "Bug", "body": "x"}]
+        # Should not crash
+        result = agent.run("/tmp", issues=issues)
+        assert result["results"][0]["action"] == "rejected"

@@ -218,6 +218,13 @@ memory:
   session_log_retention_days: 30
   long_term_dir: "memory/long-term"
 
+# --- Rejection Learner ---
+rejection_learner:
+  enabled: true
+  min_rejections: 5
+  lookback_days: 7
+  target_agents: [bug-fixer, feature-proposer]
+
 # --- Testing ---
 testing:
   run_full_suite_before_pr: true

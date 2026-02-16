@@ -17,6 +17,7 @@ from wiz.coordination.distributed_lock import DistributedLockManager
 from wiz.coordination.github_issues import GitHubIssues
 from wiz.coordination.github_prs import GitHubPRs
 from wiz.coordination.loop_tracker import LoopTracker
+from wiz.memory.rejection_journal import RejectionJournal
 from wiz.notifications.telegram import TelegramNotifier
 from wiz.orchestrator.self_improve import SelfImprovementGuard
 
@@ -40,6 +41,7 @@ class ReviewerAgent(BaseAgent):
         repo_name: str = "",
         distributed_locks: DistributedLockManager | None = None,
         self_improve: bool = False,
+        rejection_journal: RejectionJournal | None = None,
     ) -> None:
         super().__init__(runner, config)
         self.reviewer_config = config
@@ -51,6 +53,7 @@ class ReviewerAgent(BaseAgent):
         self.distributed_locks = distributed_locks
         self.self_improve = self_improve
         self.guard = SelfImprovementGuard() if self_improve else None
+        self.rejection_journal = rejection_journal
 
     def build_prompt(self, **kwargs: Any) -> str:
         """Build review prompt for a specific issue."""
@@ -229,6 +232,15 @@ If the fix is inadequate:
                     self.github.update_labels(
                         number, add=["needs-fix"], remove=["needs-review"]
                     )
+
+                    if self.rejection_journal:
+                        self.rejection_journal.record(
+                            repo=self.repo_name,
+                            issue_number=number,
+                            branch=branch,
+                            feedback=feedback,
+                            agent="bug-fixer",
+                        )
 
                     if self.loop_tracker.is_max_reached(number):
                         self._escalate(number, issue.get("title", ""))

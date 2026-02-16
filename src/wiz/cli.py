@@ -117,6 +117,25 @@ def run_content_cycle(ctx: click.Context) -> None:
     click.echo(state.summary())
 
 
+@run.command("rejection-cycle")
+@click.pass_context
+def run_rejection_cycle(ctx: click.Context) -> None:
+    """Run the rejection learning cycle (analyze patterns, propose improvements)."""
+    from wiz.config.loader import load_config
+    from wiz.orchestrator.rejection_pipeline import RejectionCyclePipeline
+
+    config = load_config(ctx.obj["config_path"])
+    pipeline = RejectionCyclePipeline(config)
+
+    logger.info("========== Rejection cycle starting ==========")
+    cycle_start = time.time()
+
+    state = pipeline.run()
+
+    logger.info("========== Rejection cycle completed (%.1fs) ==========", time.time() - cycle_start)
+    click.echo(state.summary())
+
+
 @run.command("feature-cycle")
 @click.option("--repo", default=None, help="Run only for specific repo")
 @click.pass_context
