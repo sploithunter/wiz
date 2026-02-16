@@ -244,6 +244,32 @@ class TestParsePostsFromResult:
         blocks = SocialManagerAgent._parse_posts_from_result(result)
         assert len(blocks) == 1
 
+    def test_parses_from_output(self):
+        """Regression test for #97: codex output stored in result.output was ignored."""
+        result = SessionResult(
+            success=True,
+            reason="completed",
+            output='```json\n{"draft_title": "Test", "posts": [{"text": "hello"}]}\n```',
+            events=[],
+        )
+        blocks = SocialManagerAgent._parse_posts_from_result(result)
+        assert len(blocks) == 1
+        assert blocks[0]["draft_title"] == "Test"
+        assert blocks[0]["posts"][0]["text"] == "hello"
+
+    def test_parses_from_output_combined_with_events(self):
+        """Output and events should both be parsed when both contain drafts."""
+        result = SessionResult(
+            success=True,
+            reason="done",
+            output='```json\n{"draft_title": "From output", "posts": [{"text": "a"}]}\n```',
+            events=[
+                {"data": {"message": '```json\n{"draft_title": "From events", "posts": [{"text": "b"}]}\n```'}},
+            ],
+        )
+        blocks = SocialManagerAgent._parse_posts_from_result(result)
+        assert len(blocks) == 2
+
     def test_parses_from_event_text_field(self):
         result = SessionResult(
             success=True,

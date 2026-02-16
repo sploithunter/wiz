@@ -97,6 +97,10 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             if text:
                 text_chunks.append(text)
 
+        # Include session output (codex stores response text here)
+        if result.output:
+            text_chunks.append(result.output)
+
         full_text = "\n".join(text_chunks)
 
         # Also try the result reason as fallback (some setups put output there)
