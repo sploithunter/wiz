@@ -99,11 +99,22 @@ def _get_base_branch(work_dir: str) -> str | None:
 
 
 def _check_files_changed(work_dir: str) -> bool:
-    """Check if the branch has any changes vs base (committed or uncommitted)."""
+    """Check if the branch has any changes vs base (committed, staged, or untracked)."""
     try:
-        # First check uncommitted changes against HEAD
+        # First check uncommitted/unstaged changes against HEAD
         result = subprocess.run(
             ["git", "diff", "--stat", "HEAD"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.stdout.strip():
+            return True
+
+        # Check for staged or untracked files via porcelain status
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
             cwd=work_dir,
             capture_output=True,
             text=True,

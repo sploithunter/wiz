@@ -35,17 +35,27 @@ class TestCheckFilesChanged:
     def test_returns_true_when_committed_changes_vs_main(self, mock_run, _mock_base):
         """Detects committed changes by comparing branch to main."""
         no_diff = MagicMock(stdout="")
+        no_status = MagicMock(stdout="")
         has_commits = MagicMock(stdout="ae2f8f8 fix something\n", returncode=0)
-        mock_run.side_effect = [no_diff, has_commits]
+        mock_run.side_effect = [no_diff, no_status, has_commits]
         assert _check_files_changed("/tmp/wt") is True
 
     @patch("wiz.agents.bug_fixer._get_base_branch", return_value="main")
     @patch("wiz.agents.bug_fixer.subprocess.run")
     def test_returns_false_when_no_diff_and_no_commits(self, mock_run, _mock_base):
         no_diff = MagicMock(stdout="")
+        no_status = MagicMock(stdout="")
         no_commits = MagicMock(stdout="", returncode=0)
-        mock_run.side_effect = [no_diff, no_commits]
+        mock_run.side_effect = [no_diff, no_status, no_commits]
         assert _check_files_changed("/tmp/wt") is False
+
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_returns_true_when_untracked_files_exist(self, mock_run):
+        """Detects untracked/staged files via git status --porcelain."""
+        no_diff = MagicMock(stdout="")
+        has_untracked = MagicMock(stdout="?? new_file.py\n")
+        mock_run.side_effect = [no_diff, has_untracked]
+        assert _check_files_changed("/tmp/wt") is True
 
     @patch("wiz.agents.bug_fixer.subprocess.run")
     def test_returns_false_on_error(self, mock_run):

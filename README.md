@@ -143,6 +143,21 @@ See `src/wiz/config/schema.py` for all available options.
 
 ## Usage
 
+### Global CLI Options
+
+```bash
+# Use a custom config file
+wiz --config /path/to/wiz.yaml run dev-cycle
+
+# Override log level (overrides config file setting)
+wiz --log-level DEBUG run dev-cycle
+
+# JSON structured logs
+wiz --json-logs run dev-cycle
+```
+
+The `--config` (`-c`) flag specifies a custom config path. When used with `wiz schedule install`, the generated launchd plists pass this path through to `wake.sh`, so scheduled runs use the correct config. The `wiz_dir` (used for launchd plist location and worktrees) is resolved by walking upward from the config file looking for `scripts/wake.sh`.
+
 ### Run cycles manually
 
 ```bash
@@ -160,7 +175,24 @@ wiz run content-cycle
 
 # Feature cycle
 wiz run feature-cycle
+
+# Rejection learning cycle (analyze review patterns, propose CLAUDE.md improvements)
+wiz run rejection-cycle
 ```
+
+### Rejection Learning Cycle
+
+Analyzes persistent rejection journal data to identify recurring patterns in reviewer feedback. When enough rejections accumulate (configurable threshold), proposes CLAUDE.md instruction updates via GitHub issues (`wiz-improvement` label) for human review.
+
+```yaml
+rejection_learner:
+  enabled: true
+  min_rejections: 5      # minimum rejections before analysis runs
+  lookback_days: 7       # analyze rejections from the last N days
+  target_agents: [bug-fixer, feature-proposer]
+```
+
+Rejection data is stored in `memory/rejections/{repo}.jsonl` — one JSON object per reviewer rejection.
 
 ### Check status
 
@@ -181,7 +213,7 @@ wiz schedule status
 wiz schedule uninstall
 ```
 
-Schedules are defined in `config/wiz.yaml` under the `schedule` key. The scheduler generates launchd plists with `StartCalendarInterval` entries and installs them in `~/Library/LaunchAgents/`.
+Schedules are defined in `config/wiz.yaml` under the `schedule` key. The scheduler generates launchd plists with `StartCalendarInterval` entries and installs them in `<wiz_dir>/launchd/` (repo-local, not `~/Library/LaunchAgents/`).
 
 **Minimum 2-hour spacing between runs.** Agent sessions (Claude up to ~40min, Codex up to ~75min) plus pipeline overhead means a single run can take up to 110 minutes. Never schedule runs less than 2 hours apart.
 
@@ -218,6 +250,60 @@ Log files:
 - Wake script: `logs/wake_YYYYMMDD_HHMMSS.log`
 - Session logs: `memory/sessions/session_*.log`
 - Bridge events: `~/.cin-interface/data/events.jsonl`
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CODING_AGENT_BRIDGE_DIR` | `~/Documents/coding-agent-bridge` | Bridge install path |
+| `CODING_AGENT_BRIDGE_URL` | `http://127.0.0.1:4003` | Bridge API URL |
+| `CODING_AGENT_BRIDGE_DATA_DIR` | `~/.cin-interface` | Hook data directory |
+| `TYPEFULLY_API_KEY` | — | API key for Typefully social media integration |
+| `GITHUB_TOKEN` | — | GitHub personal access token (used by `gh` CLI) |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token for notifications (alternative to config) |
+
+These can also be set in `config/wiz.yaml` under their respective sections. `scripts/wake.sh` sources shell profiles to pick up environment variables for launchd-scheduled runs.
+
+### Configuration Reference
+
+All settings live in `config/wiz.yaml`. Key sections beyond the basic example above:
+
+```yaml
+global:
+  log_level: "info"             # Applied when --log-level CLI flag is not set
+  machine_id: "macbook-1"       # Enables distributed locking when set
+  timezone: "America/New_York"
+
+repos:
+  - name: "my-repo"
+    path: "/path/to/repo"
+    github: "owner/repo"
+    enabled: true
+    self_improve: false
+    allowed_issue_authors: []   # Restrict which GitHub users can create issues for this repo
+
+testing:
+  run_full_suite_before_pr: true       # Instruction for agents to run full test suite
+  require_new_tests_for_fixes: true    # Instruction for agents to write regression tests
+  require_new_tests_for_features: true # Instruction for agents to write feature tests
+  no_known_bugs_for_completion: true   # Instruction for agents to check for known bugs
+
+worktrees:
+  base_dir: ".worktrees"
+  stale_days: 7                 # Auto-cleanup worktrees older than N days
+  auto_cleanup_merged: true     # Remove worktrees whose branches are merged
+
+locking:
+  ttl: 600                      # File lock TTL in seconds
+  lock_dir: ".wiz/locks"
+
+escalation:
+  max_issue_strikes: 3
+  max_file_strikes: 3
+  strike_file: ".wiz/strikes.json"
+```
+
+The `testing` section values are passed to agent prompts as instructions — agents are told to follow these policies when fixing bugs or implementing features. See `src/wiz/config/schema.py` for the complete schema.
 
 ## Architecture
 
@@ -273,7 +359,7 @@ mypy src/wiz/
 
 ## Safety
 
-- **PRs are never auto-merged** — Human review required for all changes
+- **Auto-merge** — When `reviewer.auto_merge: true` (default), approved PRs are squash-merged automatically after review. Set `auto_merge: false` to require manual merging
 - **Three-strike escalation** — Issues that fail repeatedly get escalated with Telegram alerts
 - **Self-improvement guard** — When Wiz works on its own repo (`self_improve: true`), the reviewer checks changed files against protected patterns (`config/wiz.yaml`, `CLAUDE.md`, `schema.py`, `escalation.py`). Protected file changes get `requires-human-review` label and Telegram notification instead of auto-closing
 - **Structured approval parsing** — Reviewer uses 3-tier verdict: (1) JSON `{"verdict": "approved"}`, (2) keyword scan with word boundaries, (3) fallback to session success
@@ -293,7 +379,8 @@ src/wiz/
 │   ├── reviewer.py
 │   ├── feature_proposer.py
 │   ├── blog_writer.py
-│   └── social_manager.py
+│   ├── social_manager.py
+│   └── rejection_learner.py
 ├── bridge/          # Coding Agent Bridge client
 │   ├── client.py    # REST client
 │   ├── monitor.py   # WebSocket event monitor
@@ -314,7 +401,8 @@ src/wiz/
 ├── memory/          # Agent memory
 │   ├── short_term.py
 │   ├── long_term.py
-│   └── session_log.py
+│   ├── rejection_journal.py
+│   └── session_logger.py
 ├── integrations/    # External services
 │   ├── google_docs.py
 │   ├── image_prompts.py
@@ -325,6 +413,7 @@ src/wiz/
     ├── pipeline.py
     ├── content_pipeline.py
     ├── feature_pipeline.py
+    ├── rejection_pipeline.py
     ├── self_improve.py
     ├── scheduler.py
     ├── escalation.py

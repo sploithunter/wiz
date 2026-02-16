@@ -15,6 +15,20 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONFIG = Path(__file__).parent.parent.parent / "config" / "wiz.yaml"
 
 
+def _apply_config_log_level(ctx: click.Context, config) -> None:
+    """Apply config log_level when no explicit CLI --log-level was given."""
+    if ctx.obj.get("cli_log_level") is not None:
+        return
+    try:
+        level_str = config.global_.log_level
+        if isinstance(level_str, str):
+            level = getattr(logging, level_str.upper(), None)
+            if level is not None:
+                logging.getLogger("wiz").setLevel(level)
+    except (AttributeError, TypeError):
+        pass
+
+
 def _resolve_wiz_dir(config_path: Path) -> Path:
     """Resolve the wiz repo root from a config path.
 
@@ -35,21 +49,22 @@ def _resolve_wiz_dir(config_path: Path) -> Path:
 @click.group()
 @click.version_option(version=__version__)
 @click.option("--config", "-c", type=click.Path(), default=None, help="Config file path")
-@click.option("--log-level", default="INFO", help="Log level")
+@click.option("--log-level", default=None, help="Log level (overrides config)")
 @click.option("--json-logs", is_flag=True, help="JSON log output")
 @click.pass_context
 def main(
     ctx: click.Context,
     config: str | None,
-    log_level: str,
+    log_level: str | None,
     json_logs: bool,
 ) -> None:
     """Wiz - Personal AI Agent."""
     from wiz.logging_config import setup_logging
 
-    setup_logging(level=log_level, json_output=json_logs)
+    setup_logging(level=log_level or "INFO", json_output=json_logs)
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = Path(config) if config else DEFAULT_CONFIG
+    ctx.obj["cli_log_level"] = log_level  # None = not explicitly set
 
 
 @main.group()
@@ -69,6 +84,7 @@ def run_dev_cycle(ctx: click.Context, repo: str | None, phase: str | None) -> No
     from wiz.orchestrator.reporter import StatusReporter
 
     config = load_config(ctx.obj["config_path"])
+    _apply_config_log_level(ctx, config)
     notifier = TelegramNotifier.from_config(config.telegram)
     pipeline = DevCyclePipeline(config, notifier)
 
@@ -106,6 +122,7 @@ def run_content_cycle(ctx: click.Context) -> None:
     from wiz.orchestrator.content_pipeline import ContentCyclePipeline
 
     config = load_config(ctx.obj["config_path"])
+    _apply_config_log_level(ctx, config)
     pipeline = ContentCyclePipeline(config)
 
     logger.info("========== Content cycle starting ==========")
@@ -125,6 +142,7 @@ def run_rejection_cycle(ctx: click.Context) -> None:
     from wiz.orchestrator.rejection_pipeline import RejectionCyclePipeline
 
     config = load_config(ctx.obj["config_path"])
+    _apply_config_log_level(ctx, config)
     pipeline = RejectionCyclePipeline(config)
 
     logger.info("========== Rejection cycle starting ==========")
@@ -145,6 +163,7 @@ def run_feature_cycle(ctx: click.Context, repo: str | None) -> None:
     from wiz.orchestrator.feature_pipeline import FeatureCyclePipeline
 
     config = load_config(ctx.obj["config_path"])
+    _apply_config_log_level(ctx, config)
     pipeline = FeatureCyclePipeline(config)
 
     if repo:
@@ -192,6 +211,7 @@ def status(ctx: click.Context) -> None:
     from wiz.orchestrator.scheduler import LaunchdScheduler
 
     config = load_config(ctx.obj["config_path"])
+    _apply_config_log_level(ctx, config)
 
     click.echo(f"Wiz v{__version__}")
     click.echo(f"Config: {ctx.obj['config_path']}")
