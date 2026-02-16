@@ -30,7 +30,8 @@ def _get_base_branch(work_dir: str) -> str | None:
     """Determine the base branch for a repository dynamically.
 
     Tries the remote default branch first (origin/HEAD), then falls back
-    to checking if common branch names exist locally.
+    to finding the local branch closest to HEAD (fewest commits ahead).
+    No branch names are hardcoded.
     """
     try:
         result = subprocess.run(
@@ -46,20 +47,56 @@ def _get_base_branch(work_dir: str) -> str | None:
     except (subprocess.TimeoutExpired, OSError):
         pass
 
-    # Fall back to checking if common branch names exist locally
-    for branch in ("main", "master", "develop"):
-        try:
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", branch],
+    # Fallback: find the local branch closest to HEAD by commit distance.
+    try:
+        current = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if current.returncode != 0:
+            return None
+        current_branch = current.stdout.strip()
+
+        branches = subprocess.run(
+            ["git", "branch", "--format=%(refname:short)"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if branches.returncode != 0:
+            return None
+
+        other_branches = [
+            b.strip()
+            for b in branches.stdout.splitlines()
+            if b.strip() and b.strip() != current_branch
+        ]
+        if not other_branches:
+            return None
+
+        best_branch = None
+        best_count: int | None = None
+        for branch in other_branches:
+            count_result = subprocess.run(
+                ["git", "rev-list", "--count", f"{branch}..HEAD"],
                 cwd=work_dir,
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            if result.returncode == 0:
-                return branch
-        except (subprocess.TimeoutExpired, OSError):
-            pass
+            if count_result.returncode == 0 and count_result.stdout.strip():
+                count = int(count_result.stdout.strip())
+                if best_count is None or count < best_count:
+                    best_count = count
+                    best_branch = branch
+
+        return best_branch
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        pass
 
     return None
 

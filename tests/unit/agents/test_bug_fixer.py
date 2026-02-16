@@ -38,23 +38,41 @@ class TestGetBaseBranch:
         assert _get_base_branch("/tmp/wt") == "develop"
 
     @patch("wiz.agents.bug_fixer.subprocess.run")
-    def test_falls_back_to_local_main(self, mock_run):
+    def test_fallback_picks_closest_local_branch(self, mock_run):
+        """When origin/HEAD is unavailable, picks the branch with fewest commits ahead."""
         origin_fail = MagicMock(returncode=1, stdout="")
-        main_exists = MagicMock(returncode=0, stdout="abc123\n")
-        mock_run.side_effect = [origin_fail, main_exists]
-        assert _get_base_branch("/tmp/wt") == "main"
-
-    @patch("wiz.agents.bug_fixer.subprocess.run")
-    def test_falls_back_to_local_develop(self, mock_run):
-        origin_fail = MagicMock(returncode=1, stdout="")
-        main_missing = MagicMock(returncode=128, stdout="")
-        master_missing = MagicMock(returncode=128, stdout="")
-        develop_exists = MagicMock(returncode=0, stdout="abc123\n")
-        mock_run.side_effect = [origin_fail, main_missing, master_missing, develop_exists]
+        current_branch = MagicMock(returncode=0, stdout="fix/123\n")
+        branch_list = MagicMock(returncode=0, stdout="develop\nfix/123\n")
+        # 1 commit ahead of develop
+        count_develop = MagicMock(returncode=0, stdout="1\n")
+        mock_run.side_effect = [origin_fail, current_branch, branch_list, count_develop]
         assert _get_base_branch("/tmp/wt") == "develop"
 
     @patch("wiz.agents.bug_fixer.subprocess.run")
-    def test_returns_none_when_no_branch_found(self, mock_run):
+    def test_fallback_picks_closest_among_multiple_branches(self, mock_run):
+        """With multiple local branches, picks the one with fewest commits ahead."""
+        origin_fail = MagicMock(returncode=1, stdout="")
+        current_branch = MagicMock(returncode=0, stdout="fix/123\n")
+        branch_list = MagicMock(returncode=0, stdout="main\nrelease/v2\nfix/123\n")
+        # 3 commits ahead of main, 1 commit ahead of release/v2
+        count_main = MagicMock(returncode=0, stdout="3\n")
+        count_release = MagicMock(returncode=0, stdout="1\n")
+        mock_run.side_effect = [
+            origin_fail, current_branch, branch_list, count_main, count_release
+        ]
+        assert _get_base_branch("/tmp/wt") == "release/v2"
+
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_returns_none_when_no_other_branches(self, mock_run):
+        """Returns None when the current branch is the only local branch."""
+        origin_fail = MagicMock(returncode=1, stdout="")
+        current_branch = MagicMock(returncode=0, stdout="develop\n")
+        branch_list = MagicMock(returncode=0, stdout="develop\n")
+        mock_run.side_effect = [origin_fail, current_branch, branch_list]
+        assert _get_base_branch("/tmp/wt") is None
+
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_returns_none_on_all_failures(self, mock_run):
         mock_run.return_value = MagicMock(returncode=128, stdout="")
         assert _get_base_branch("/tmp/wt") is None
 
