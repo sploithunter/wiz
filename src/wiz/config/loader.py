@@ -19,7 +19,7 @@ def load_config(path: Path | str | None = None) -> WizConfig:
         return WizConfig()
 
     path = Path(path)
-    if not path.exists():
+    if not path.is_file():
         return WizConfig()
 
     text = path.read_text()
