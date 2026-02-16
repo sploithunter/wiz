@@ -114,3 +114,72 @@ class TestWorktreeManager:
     def test_list_worktrees_error(self, mock_run):
         mock_run.side_effect = subprocess.CalledProcessError(1, "git")
         assert self.wt.list_worktrees() == []
+
+
+class TestWorktreeExistingBranchIntegration:
+    """Integration-style tests using a real temporary git repo.
+
+    Regression tests for #38: WorktreeManager.create() must handle
+    pre-existing local branches without raising CalledProcessError.
+    """
+
+    def _init_repo(self, tmp_path: Path) -> Path:
+        """Create a minimal git repo with an initial commit."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(
+            ["git", "init", "-q", "--initial-branch=main"],
+            cwd=repo, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=repo, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=repo, check=True,
+        )
+        (repo / "a.txt").write_text("hi")
+        subprocess.run(["git", "add", "a.txt"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "init"],
+            cwd=repo, check=True,
+        )
+        return repo
+
+    def test_create_reuses_existing_branch(self, tmp_path: Path):
+        """#38 repro: create() succeeds when the branch already exists."""
+        repo = self._init_repo(tmp_path)
+
+        # Create the branch ahead of time, then switch back to main
+        subprocess.run(
+            ["git", "checkout", "-q", "-b", "fix/42"],
+            cwd=repo, check=True,
+        )
+        subprocess.run(["git", "checkout", "-q", "main"], cwd=repo, check=True)
+
+        wm = WorktreeManager(repo)
+        path = wm.create("fix", 42)
+        assert path.exists()
+        assert (path / "a.txt").read_text() == "hi"
+
+        # Cleanup worktree to avoid git state leaking between tests
+        wm.remove("fix", 42)
+
+    def test_create_new_branch_real_repo(self, tmp_path: Path):
+        """create() works normally when the branch does not exist yet."""
+        repo = self._init_repo(tmp_path)
+
+        wm = WorktreeManager(repo)
+        path = wm.create("feature", 99)
+        assert path.exists()
+        assert (path / "a.txt").read_text() == "hi"
+
+        # Verify the branch was actually created
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "refs/heads/feature/99"],
+            cwd=repo, capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+
+        wm.remove("feature", 99)
