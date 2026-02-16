@@ -206,9 +206,10 @@ def schedule_install(ctx: click.Context) -> None:
     from wiz.config.loader import load_config
     from wiz.orchestrator.scheduler import LaunchdScheduler
 
-    config = load_config(ctx.obj["config_path"])
-    wiz_dir = _resolve_wiz_dir(ctx.obj["config_path"])
-    scheduler = LaunchdScheduler(wiz_dir)
+    config_path = ctx.obj["config_path"]
+    config = load_config(config_path)
+    wiz_dir = _resolve_wiz_dir(config_path)
+    scheduler = LaunchdScheduler(wiz_dir, config_path=config_path)
 
     # Per-phase schedules override the combined dev_cycle if present
     phase_schedules = [

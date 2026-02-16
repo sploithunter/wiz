@@ -9,7 +9,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WIZ_DIR="$(dirname "$SCRIPT_DIR")"
 CYCLE_TYPE="${1:-dev-cycle}"
 shift || true
-EXTRA_ARGS="$*"
+
+# Parse --config flag separately (must precede 'run' in the wiz command)
+CONFIG_PATH=""
+EXTRA_ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --config)
+            CONFIG_PATH="$2"
+            shift 2
+            ;;
+        *)
+            EXTRA_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
 
 # --- Environment setup for launchd ---
 # launchd runs with minimal PATH/env. Source shell profile to get
@@ -74,8 +89,16 @@ pip3 install -e "$WIZ_DIR" --break-system-packages -q 2>&1 | tee -a "$LOG_FILE" 
 
 # Run the requested cycle
 cd "$WIZ_DIR"
-log "Running: wiz run $CYCLE_TYPE $EXTRA_ARGS"
-wiz run "$CYCLE_TYPE" $EXTRA_ARGS 2>&1 | tee -a "$LOG_FILE"
+WIZ_CMD=(wiz)
+if [ -n "$CONFIG_PATH" ]; then
+    WIZ_CMD+=(--config "$CONFIG_PATH")
+fi
+WIZ_CMD+=(run "$CYCLE_TYPE")
+if [ ${#EXTRA_ARGS[@]} -gt 0 ]; then
+    WIZ_CMD+=("${EXTRA_ARGS[@]}")
+fi
+log "Running: ${WIZ_CMD[*]}"
+"${WIZ_CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
 EXIT_CODE=${PIPESTATUS[0]}
 
 log "Cycle complete (exit code: $EXIT_CODE)"
