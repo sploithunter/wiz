@@ -75,8 +75,10 @@ pip3 install -e "$WIZ_DIR" --break-system-packages -q 2>&1 | tee -a "$LOG_FILE" 
 # Run the requested cycle
 cd "$WIZ_DIR"
 log "Running: wiz run $CYCLE_TYPE $EXTRA_ARGS"
+set +e
 wiz run "$CYCLE_TYPE" $EXTRA_ARGS 2>&1 | tee -a "$LOG_FILE"
 EXIT_CODE=${PIPESTATUS[0]}
+set -e
 
 log "Cycle complete (exit code: $EXIT_CODE)"
 
