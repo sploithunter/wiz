@@ -179,7 +179,7 @@ if [ -f "$CONFIG_FILE" ]; then
     ok "Config file: $CONFIG_FILE"
 else
     warn "No config file found"
-    info "Copy the template: cp $WIZ_DIR/config/wiz.yaml.example $CONFIG_FILE"
+    info "Create a config file at $CONFIG_FILE (see src/wiz/config/schema.py for options)"
 fi
 
 # ─── Google Docs (optional) ──────────────────────────────────────────
