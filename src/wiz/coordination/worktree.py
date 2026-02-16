@@ -35,6 +35,14 @@ class WorktreeManager:
             timeout=30,
         )
 
+    def _branch_exists(self, branch: str) -> bool:
+        """Check whether a local branch already exists."""
+        try:
+            self._run_git(["rev-parse", "--verify", f"refs/heads/{branch}"])
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
     def create(self, agent_type: str, issue: int | str) -> Path:
         """Create a worktree. Returns the worktree path."""
         wt_path = self._worktree_path(agent_type, issue)
@@ -44,7 +52,10 @@ class WorktreeManager:
             return wt_path
 
         wt_path.parent.mkdir(parents=True, exist_ok=True)
-        self._run_git(["worktree", "add", "-b", branch, str(wt_path)])
+        if self._branch_exists(branch):
+            self._run_git(["worktree", "add", str(wt_path), branch])
+        else:
+            self._run_git(["worktree", "add", "-b", branch, str(wt_path)])
         logger.info("Created worktree: %s (branch: %s)", wt_path, branch)
         return wt_path
 
