@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from wiz.agents.base import BaseAgent
@@ -13,8 +12,6 @@ from wiz.config.schema import BugHunterConfig
 from wiz.coordination.github_issues import GitHubIssues
 
 logger = logging.getLogger(__name__)
-
-CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "bug-hunter" / "CLAUDE.md"
 
 
 class BugHunterAgent(BaseAgent):
@@ -33,10 +30,7 @@ class BugHunterAgent(BaseAgent):
 
     def build_prompt(self, **kwargs: Any) -> str:
         """Build bug hunting prompt with existing issues context."""
-        # Load CLAUDE.md instructions
-        instructions = ""
-        if CLAUDE_MD_PATH.exists():
-            instructions = CLAUDE_MD_PATH.read_text()
+        instructions = self._load_instructions(kwargs.get("cwd"))
 
         # Get existing issues to avoid duplicates
         existing = kwargs.get("existing_issues", [])

@@ -18,8 +18,6 @@ from wiz.memory.long_term import LongTermMemory
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "blog-writer" / "CLAUDE.md"
-
 # Memory keywords for topic lifecycle
 PROPOSED_TOPIC_KEY = "blog-proposed-topic"
 PROPOSED_TOPIC_FILE = "blog-proposed-topic.md"
@@ -202,9 +200,7 @@ class BlogWriterAgent(BaseAgent):
 
     def build_prompt(self, **kwargs: Any) -> str:
         mode = kwargs.get("mode", "propose")
-        instructions = ""
-        if CLAUDE_MD_PATH.exists():
-            instructions = CLAUDE_MD_PATH.read_text()
+        instructions = self._load_instructions(kwargs.get("cwd"))
 
         memory_context = ""
         if self.memory:
@@ -253,7 +249,7 @@ Draw on the project activity context above where relevant.
         if pending_topic:
             # Write mode: draft the pending topic
             logger.info("Found pending topic, switching to write mode")
-            prompt = self.build_prompt(mode="write", topic=pending_topic)
+            prompt = self.build_prompt(mode="write", topic=pending_topic, cwd=cwd)
             result = self.runner.run(
                 name="wiz-blog-write",
                 cwd=cwd,
@@ -271,7 +267,7 @@ Draw on the project activity context above where relevant.
         elif self.blog_config.auto_propose_topics:
             # Propose mode: generate a topic for next run
             logger.info("No pending topic, running in propose mode")
-            prompt = self.build_prompt(mode="propose")
+            prompt = self.build_prompt(mode="propose", cwd=cwd)
             result = self.runner.run(
                 name="wiz-blog-propose",
                 cwd=cwd,

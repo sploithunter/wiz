@@ -6,7 +6,6 @@ import json
 import logging
 import re
 import subprocess
-from pathlib import Path
 from typing import Any
 
 from wiz.agents.base import BaseAgent
@@ -21,8 +20,6 @@ from wiz.notifications.telegram import TelegramNotifier
 from wiz.orchestrator.self_improve import SelfImprovementGuard
 
 logger = logging.getLogger(__name__)
-
-CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "reviewer" / "CLAUDE.md"
 
 
 class ReviewerAgent(BaseAgent):
@@ -55,9 +52,7 @@ class ReviewerAgent(BaseAgent):
     def build_prompt(self, **kwargs: Any) -> str:
         """Build review prompt for a specific issue."""
         issue = kwargs.get("issue", {})
-        instructions = ""
-        if CLAUDE_MD_PATH.exists():
-            instructions = CLAUDE_MD_PATH.read_text()
+        instructions = self._load_instructions(kwargs.get("cwd"))
 
         title = issue.get("title", "Unknown")
         body = issue.get("body", "No description")
@@ -124,7 +119,7 @@ If the fix is inadequate:
 
             try:
                 # Run review session
-                prompt = self.build_prompt(issue=issue, branch=branch)
+                prompt = self.build_prompt(issue=issue, branch=branch, cwd=cwd)
                 result = self.runner.run(
                     name=f"wiz-reviewer-{number}",
                     cwd=cwd,

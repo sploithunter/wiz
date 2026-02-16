@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from wiz.agents.base import BaseAgent
@@ -15,11 +14,6 @@ from wiz.coordination.worktree import WorktreeManager
 from wiz.notifications.telegram import TelegramNotifier
 
 logger = logging.getLogger(__name__)
-
-CLAUDE_MD_PATH = (
-    Path(__file__).parent.parent.parent.parent / "agents" / "feature-proposer" / "CLAUDE.md"
-)
-
 
 class FeatureProposerAgent(BaseAgent):
     agent_type = "claude"
@@ -41,9 +35,7 @@ class FeatureProposerAgent(BaseAgent):
 
     def build_prompt(self, **kwargs: Any) -> str:
         mode = kwargs.get("mode", "propose")
-        instructions = ""
-        if CLAUDE_MD_PATH.exists():
-            instructions = CLAUDE_MD_PATH.read_text()
+        instructions = self._load_instructions(kwargs.get("cwd"))
 
         if mode == "propose":
             return f"""{instructions}
@@ -119,7 +111,7 @@ Commit all changes and ensure all tests pass.
             number = issue.get("number", 0)
             wt_path = self.worktree.create("feature", number)
 
-            prompt = self.build_prompt(mode="implement", issue=issue)
+            prompt = self.build_prompt(mode="implement", issue=issue, cwd=str(wt_path))
             result = self.runner.run(
                 name=f"wiz-feature-{number}",
                 cwd=str(wt_path),
@@ -153,7 +145,7 @@ Commit all changes and ensure all tests pass.
             number = issue.get("number", 0)
             wt_path = self.worktree.create("feature", number)
 
-            prompt = self.build_prompt(mode="implement", issue=issue)
+            prompt = self.build_prompt(mode="implement", issue=issue, cwd=str(wt_path))
             result = self.runner.run(
                 name=f"wiz-feature-{number}",
                 cwd=str(wt_path),
@@ -185,7 +177,7 @@ Commit all changes and ensure all tests pass.
 
         if self.fp_config.auto_propose_features:
             # No candidates at all — propose a new feature
-            prompt = self.build_prompt(mode="propose")
+            prompt = self.build_prompt(mode="propose", cwd=cwd)
             result = self.runner.run(
                 name="wiz-feature-propose",
                 cwd=cwd,

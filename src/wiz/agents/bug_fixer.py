@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Any
 
 from wiz.agents.base import BaseAgent
@@ -19,8 +18,6 @@ from wiz.coordination.stagnation import StagnationDetector
 from wiz.coordination.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
-
-CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "bug-fixer" / "CLAUDE.md"
 
 # Priority ordering for issues
 PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4"]
@@ -93,9 +90,7 @@ class BugFixerAgent(BaseAgent):
     def build_prompt(self, **kwargs: Any) -> str:
         """Build fix prompt for a specific issue."""
         issue = kwargs.get("issue", {})
-        instructions = ""
-        if CLAUDE_MD_PATH.exists():
-            instructions = CLAUDE_MD_PATH.read_text()
+        instructions = self._load_instructions(kwargs.get("cwd"))
 
         title = issue.get("title", "Unknown")
         body = issue.get("body", "No description")
@@ -200,7 +195,7 @@ Pay close attention to this feedback. The fix was rejected for specific reasons 
                 work_dir = cwd
 
             # Build and run
-            prompt = self.build_prompt(issue=issue)
+            prompt = self.build_prompt(issue=issue, cwd=work_dir)
             result = self.runner.run(
                 name=f"wiz-bug-fixer-{number}",
                 cwd=work_dir,

@@ -19,10 +19,6 @@ from wiz.memory.long_term import LongTermMemory
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_MD_PATH = (
-    Path(__file__).parent.parent.parent.parent / "agents" / "social-manager" / "CLAUDE.md"
-)
-
 
 class SocialManagerAgent(BaseAgent):
     agent_type = "claude"
@@ -46,9 +42,7 @@ class SocialManagerAgent(BaseAgent):
         if self.social_config.social_posts_per_week == 0:
             return ""
 
-        instructions = ""
-        if CLAUDE_MD_PATH.exists():
-            instructions = CLAUDE_MD_PATH.read_text()
+        instructions = self._load_instructions(kwargs.get("cwd"))
 
         memory_context = ""
         if self.memory:
@@ -130,7 +124,7 @@ Create up to {self.social_config.social_posts_per_week} drafts.
         if self.social_config.social_posts_per_week == 0:
             return {"skipped": True, "reason": "disabled"}
 
-        prompt = self.build_prompt(**kwargs)
+        prompt = self.build_prompt(cwd=cwd, **kwargs)
         result = self.runner.run(
             name="wiz-social-manager",
             cwd=cwd,
