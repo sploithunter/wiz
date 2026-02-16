@@ -348,6 +348,31 @@ class TestEnsureHooks:
         # Stop should still have exactly 1 entry (not duplicated)
         assert len(data["hooks"]["Stop"]) == 1
 
+    def test_no_duplicate_when_hook_at_non_zero_index(self, tmp_path):
+        """Regression test for #30: hook command at index >0 must not cause duplicates."""
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings = settings_dir / "settings.json"
+
+        hook_script = tmp_path / "hook.sh"
+        hook_script.write_text("#!/bin/bash\n")
+
+        # Pre-populate with the Wiz hook at index 1 (not 0)
+        initial = {"hooks": {"Stop": [{"matcher": "*", "hooks": [
+            {"type": "command", "command": "/bin/true"},
+            {"type": "command", "command": str(hook_script)},
+        ]}]}}
+        settings.write_text(json.dumps(initial))
+
+        with patch("wiz.bridge.runner._HOOK_SCRIPT", str(hook_script)), \
+             patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
+            result = ensure_hooks()
+
+        assert result is True
+        data = json.loads(settings.read_text())
+        # Should still have exactly 1 top-level Stop entry (no duplicate appended)
+        assert len(data["hooks"]["Stop"]) == 1
+
     def test_returns_false_if_hook_script_missing(self, tmp_path):
         with patch("wiz.bridge.runner._HOOK_SCRIPT", str(tmp_path / "nonexistent.sh")), \
              patch("wiz.bridge.runner.Path.home", return_value=tmp_path):

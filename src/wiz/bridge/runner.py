@@ -70,10 +70,11 @@ def ensure_hooks(cwd: str | None = None) -> bool:
                     changed = True
                 else:
                     # Check if our hook script is already in the list
+                    # Scan ALL commands in every hooks array, not just [0]
                     existing_cmds = [
-                        h.get("hooks", [{}])[0].get("command", "")
+                        cmd.get("command", "")
                         for h in hooks[event_type]
-                        if h.get("hooks")
+                        for cmd in h.get("hooks", [])
                     ]
                     if _HOOK_SCRIPT not in existing_cmds:
                         hooks[event_type].append(_HOOK_ENTRY)
