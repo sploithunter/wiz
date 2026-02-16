@@ -26,8 +26,46 @@ CLAUDE_MD_PATH = Path(__file__).parent.parent.parent.parent / "agents" / "bug-fi
 PRIORITY_ORDER = ["P0", "P1", "P2", "P3", "P4"]
 
 
+def _get_base_branch(work_dir: str) -> str | None:
+    """Determine the base branch for a repository dynamically.
+
+    Tries the remote default branch first (origin/HEAD), then falls back
+    to checking if common branch names exist locally.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "symbolic-ref", "refs/remotes/origin/HEAD"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # "refs/remotes/origin/develop" -> "develop"
+            return result.stdout.strip().split("/")[-1]
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+
+    # Fall back to checking if common branch names exist locally
+    for branch in ("main", "master", "develop"):
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", branch],
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return branch
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    return None
+
+
 def _check_files_changed(work_dir: str) -> bool:
-    """Check if the branch has any changes vs main (committed or uncommitted)."""
+    """Check if the branch has any changes vs the base branch (committed or uncommitted)."""
     try:
         # First check uncommitted changes against HEAD
         result = subprocess.run(
@@ -40,9 +78,10 @@ def _check_files_changed(work_dir: str) -> bool:
         if result.stdout.strip():
             return True
 
-        # Then check committed changes vs the base branch (main)
+        # Then check committed changes vs the base branch
         # This catches the case where Claude Code already committed the fix
-        for base in ("main", "master"):
+        base = _get_base_branch(work_dir)
+        if base:
             result = subprocess.run(
                 ["git", "log", "--oneline", f"{base}..HEAD"],
                 cwd=work_dir,

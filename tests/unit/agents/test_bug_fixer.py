@@ -3,7 +3,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from wiz.agents.bug_fixer import BugFixerAgent, _check_files_changed, _extract_priority
+from wiz.agents.bug_fixer import (
+    BugFixerAgent,
+    _check_files_changed,
+    _extract_priority,
+    _get_base_branch,
+)
 from wiz.bridge.runner import SessionRunner
 from wiz.bridge.types import SessionResult
 from wiz.config.schema import BugFixerConfig
@@ -24,32 +29,83 @@ class TestPriorityExtraction:
         assert _extract_priority({"title": "Some bug"}) == 5  # After all priorities
 
 
+class TestGetBaseBranch:
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_uses_origin_head_when_available(self, mock_run):
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="refs/remotes/origin/develop\n"
+        )
+        assert _get_base_branch("/tmp/wt") == "develop"
+
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_falls_back_to_local_main(self, mock_run):
+        origin_fail = MagicMock(returncode=1, stdout="")
+        main_exists = MagicMock(returncode=0, stdout="abc123\n")
+        mock_run.side_effect = [origin_fail, main_exists]
+        assert _get_base_branch("/tmp/wt") == "main"
+
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_falls_back_to_local_develop(self, mock_run):
+        origin_fail = MagicMock(returncode=1, stdout="")
+        main_missing = MagicMock(returncode=128, stdout="")
+        master_missing = MagicMock(returncode=128, stdout="")
+        develop_exists = MagicMock(returncode=0, stdout="abc123\n")
+        mock_run.side_effect = [origin_fail, main_missing, master_missing, develop_exists]
+        assert _get_base_branch("/tmp/wt") == "develop"
+
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_returns_none_when_no_branch_found(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=128, stdout="")
+        assert _get_base_branch("/tmp/wt") is None
+
+
 class TestCheckFilesChanged:
     @patch("wiz.agents.bug_fixer.subprocess.run")
     def test_returns_true_when_uncommitted_diff_exists(self, mock_run):
         mock_run.return_value = MagicMock(stdout=" src/foo.py | 3 +++\n 1 file changed")
         assert _check_files_changed("/tmp/wt") is True
 
+    @patch("wiz.agents.bug_fixer._get_base_branch", return_value="main")
     @patch("wiz.agents.bug_fixer.subprocess.run")
-    def test_returns_true_when_committed_changes_vs_main(self, mock_run):
-        """Detects committed changes by comparing branch to main."""
+    def test_returns_true_when_committed_changes_vs_base(self, mock_run, _mock_base):
+        """Detects committed changes by comparing branch to the dynamically resolved base."""
         no_diff = MagicMock(stdout="")
         has_commits = MagicMock(stdout="ae2f8f8 fix something\n", returncode=0)
         mock_run.side_effect = [no_diff, has_commits]
         assert _check_files_changed("/tmp/wt") is True
 
+    @patch("wiz.agents.bug_fixer._get_base_branch", return_value="main")
     @patch("wiz.agents.bug_fixer.subprocess.run")
-    def test_returns_false_when_no_diff_and_no_commits(self, mock_run):
+    def test_returns_false_when_no_diff_and_no_commits(self, mock_run, _mock_base):
         no_diff = MagicMock(stdout="")
-        no_commits_main = MagicMock(stdout="", returncode=0)
-        no_commits_master = MagicMock(stdout="", returncode=0)
-        mock_run.side_effect = [no_diff, no_commits_main, no_commits_master]
+        no_commits = MagicMock(stdout="", returncode=0)
+        mock_run.side_effect = [no_diff, no_commits]
         assert _check_files_changed("/tmp/wt") is False
 
     @patch("wiz.agents.bug_fixer.subprocess.run")
     def test_returns_false_on_error(self, mock_run):
         import subprocess as sp
         mock_run.side_effect = sp.CalledProcessError(1, "git")
+        assert _check_files_changed("/tmp/wt") is False
+
+    @patch("wiz.agents.bug_fixer._get_base_branch", return_value="develop")
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_detects_changes_on_non_main_base_branch(self, mock_run, _mock_base):
+        """Regression test for issue #82: repos with non-main/master default branches."""
+        no_diff = MagicMock(stdout="")
+        has_commits = MagicMock(stdout="abc1234 fix something\n", returncode=0)
+        mock_run.side_effect = [no_diff, has_commits]
+        assert _check_files_changed("/tmp/wt") is True
+        # Verify it compared against 'develop', not 'main' or 'master'
+        log_call = mock_run.call_args_list[1]
+        assert "develop..HEAD" in log_call[0][0]
+
+    @patch("wiz.agents.bug_fixer._get_base_branch", return_value=None)
+    @patch("wiz.agents.bug_fixer.subprocess.run")
+    def test_returns_false_when_no_base_branch_found(self, mock_run, _mock_base):
+        """When no base branch can be determined, only uncommitted changes are checked."""
+        no_diff = MagicMock(stdout="")
+        mock_run.return_value = no_diff
         assert _check_files_changed("/tmp/wt") is False
 
 
