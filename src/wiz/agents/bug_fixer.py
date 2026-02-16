@@ -206,6 +206,7 @@ Pay close attention to this feedback. The fix was rejected for specific reasons 
                 cwd=work_dir,
                 prompt=prompt,
                 agent=self.agent_type,
+                model=self.fixer_config.model or None,
                 timeout=timeout,
                 flags=self.fixer_config.flags or None,
             )

@@ -130,6 +130,7 @@ If the fix is inadequate:
                     cwd=cwd,
                     prompt=prompt,
                     agent=self.agent_type,
+                    model=self.reviewer_config.model or None,
                     timeout=timeout,
                     flags=self.reviewer_config.flags or None,
                 )

@@ -1,5 +1,6 @@
 """Tests for base agent."""
 
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -34,6 +35,7 @@ class TestBaseAgent:
             cwd="/tmp",
             prompt="Test prompt: find bugs",
             agent="claude",
+            model=None,
             timeout=60,
             flags=None,
         )
@@ -61,3 +63,41 @@ class TestBaseAgent:
         agent = ConcreteAgent(runner)
         result = agent.run("/tmp")
         assert result["success"] is False
+
+    def test_model_from_config_passed_to_runner(self):
+        """Regression test for #84: config model must be forwarded to runner."""
+        runner = MagicMock(spec=SessionRunner)
+        runner.run.return_value = SessionResult(
+            success=True, reason="ok", elapsed=1.0
+        )
+
+        config = SimpleNamespace(model="opus", flags=None)
+        agent = ConcreteAgent(runner, config)
+        agent.run("/tmp", timeout=30)
+
+        assert runner.run.call_args[1]["model"] == "opus"
+
+    def test_model_none_when_config_has_no_model(self):
+        """model=None when config doesn't have a model attribute."""
+        runner = MagicMock(spec=SessionRunner)
+        runner.run.return_value = SessionResult(
+            success=True, reason="ok", elapsed=1.0
+        )
+
+        agent = ConcreteAgent(runner)  # no config
+        agent.run("/tmp")
+
+        assert runner.run.call_args[1]["model"] is None
+
+    def test_model_none_when_config_model_is_empty_string(self):
+        """Empty string model should be passed as None."""
+        runner = MagicMock(spec=SessionRunner)
+        runner.run.return_value = SessionResult(
+            success=True, reason="ok", elapsed=1.0
+        )
+
+        config = SimpleNamespace(model="", flags=None)
+        agent = ConcreteAgent(runner, config)
+        agent.run("/tmp")
+
+        assert runner.run.call_args[1]["model"] is None

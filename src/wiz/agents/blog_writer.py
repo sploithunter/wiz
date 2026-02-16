@@ -259,6 +259,7 @@ Draw on the project activity context above where relevant.
                 cwd=cwd,
                 prompt=prompt,
                 agent=self.agent_type,
+                model=self.blog_config.model or None,
                 timeout=timeout,
                 flags=self.blog_config.flags or None,
             )
@@ -277,6 +278,7 @@ Draw on the project activity context above where relevant.
                 cwd=cwd,
                 prompt=prompt,
                 agent=self.agent_type,
+                model=self.blog_config.model or None,
                 timeout=timeout,
                 flags=self.blog_config.flags or None,
             )

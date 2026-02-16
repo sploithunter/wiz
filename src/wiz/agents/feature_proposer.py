@@ -125,6 +125,7 @@ Commit all changes and ensure all tests pass.
                 cwd=str(wt_path),
                 prompt=prompt,
                 agent=self.agent_type,
+                model=self.fp_config.model or None,
                 timeout=timeout,
                 flags=self.fp_config.flags or None,
             )
@@ -159,6 +160,7 @@ Commit all changes and ensure all tests pass.
                 cwd=str(wt_path),
                 prompt=prompt,
                 agent=self.agent_type,
+                model=self.fp_config.model or None,
                 timeout=timeout,
                 flags=self.fp_config.flags or None,
             )
@@ -191,6 +193,7 @@ Commit all changes and ensure all tests pass.
                 cwd=cwd,
                 prompt=prompt,
                 agent=self.agent_type,
+                model=self.fp_config.model or None,
                 timeout=timeout,
                 flags=self.fp_config.flags or None,
             )

@@ -136,6 +136,7 @@ Create up to {self.social_config.social_posts_per_week} drafts.
             cwd=cwd,
             prompt=prompt,
             agent=self.agent_type,
+            model=self.social_config.model or None,
             timeout=timeout,
         )
 
