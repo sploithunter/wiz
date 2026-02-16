@@ -176,7 +176,7 @@ class TestSocialManagerAgent:
         assert result["image_prompts_saved"] == 0
 
     @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
-    def test_run_caps_drafts_to_social_posts_per_week(self, _mock_img):
+    def test_run_caps_drafts_to_social_posts_per_week(self, mock_save_img):
         """Regression test for #29: social_posts_per_week must cap created drafts."""
         typefully = MagicMock(spec=TypefullyClient)
         typefully.enabled = True
@@ -187,9 +187,9 @@ class TestSocialManagerAgent:
 
         # LLM returns 3 drafts, but the cap is 1
         json_output = "\n".join([
-            '```json\n{"draft_title":"a","posts":[{"text":"one"}]}\n```',
-            '```json\n{"draft_title":"b","posts":[{"text":"two"}]}\n```',
-            '```json\n{"draft_title":"c","posts":[{"text":"three"}]}\n```',
+            '```json\n{"draft_title":"a","posts":[{"text":"one"}],"image_prompt":"img a"}\n```',
+            '```json\n{"draft_title":"b","posts":[{"text":"two"}],"image_prompt":"img b"}\n```',
+            '```json\n{"draft_title":"c","posts":[{"text":"three"}],"image_prompt":"img c"}\n```',
         ])
         runner.run.return_value = SessionResult(
             success=True,
@@ -201,6 +201,75 @@ class TestSocialManagerAgent:
         assert result["drafts_parsed"] == 1
         assert result["drafts_created"] == 1
         assert typefully.create_draft.call_count == 1
+        # Image prompt saving also receives only the capped list (1 draft, not 3)
+        saved_drafts = mock_save_img.call_args[0][0]
+        assert len(saved_drafts) == 1
+
+    @patch("wiz.agents.social_manager.save_all_image_prompts")
+    def test_run_caps_image_prompts_to_social_posts_per_week(self, mock_save_img):
+        """Regression test for #29: image prompt saving respects the cap."""
+        from pathlib import Path
+
+        mock_save_img.return_value = [Path("/tmp/prompt.md")]
+
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = False
+
+        config = SocialManagerConfig(social_posts_per_week=1)
+        agent, runner, _ = self._make_agent(config, typefully=typefully)
+
+        json_output = "\n".join([
+            '```json\n{"draft_title":"a","posts":[{"text":"one"}],"image_prompt":"img a"}\n```',
+            '```json\n{"draft_title":"b","posts":[{"text":"two"}],"image_prompt":"img b"}\n```',
+            '```json\n{"draft_title":"c","posts":[{"text":"three"}],"image_prompt":"img c"}\n```',
+        ])
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": json_output}}],
+        )
+
+        result = agent.run("/tmp")
+        assert result["drafts_parsed"] == 1
+        # save_all_image_prompts receives only the capped list (1 draft)
+        mock_save_img.assert_called_once()
+        saved_drafts = mock_save_img.call_args[0][0]
+        assert len(saved_drafts) == 1
+        assert saved_drafts[0]["draft_title"] == "a"
+
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_caps_google_docs_to_social_posts_per_week(self, _mock_img):
+        """Regression test for #29: Google Docs creation respects the cap."""
+        from wiz.integrations.google_docs import DocResult, GoogleDocsClient
+
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = False
+
+        gdocs = MagicMock(spec=GoogleDocsClient)
+        gdocs.enabled = True
+        gdocs.create_document.return_value = DocResult(
+            success=True, doc_id="d1", url="https://docs.google.com/document/d/d1/edit"
+        )
+
+        config = SocialManagerConfig(social_posts_per_week=1)
+        agent, runner, _ = self._make_agent(config, typefully=typefully)
+        agent.google_docs = gdocs
+
+        json_output = "\n".join([
+            '```json\n{"draft_title":"a","posts":[{"text":"one"}],"image_prompt":"img a"}\n```',
+            '```json\n{"draft_title":"b","posts":[{"text":"two"}],"image_prompt":"img b"}\n```',
+            '```json\n{"draft_title":"c","posts":[{"text":"three"}],"image_prompt":"img c"}\n```',
+        ])
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": json_output}}],
+        )
+
+        result = agent.run("/tmp")
+        assert result["drafts_parsed"] == 1
+        assert len(result["doc_urls"]) == 1
+        assert gdocs.create_document.call_count == 1
 
     @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
     def test_run_no_google_docs_when_disabled(self, _mock_img):
