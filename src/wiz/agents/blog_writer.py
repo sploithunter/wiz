@@ -160,6 +160,9 @@ class BlogWriterAgent(BaseAgent):
         full_text = "\n".join(text_chunks)
 
         if not full_text.strip():
+            full_text = result.output or ""
+
+        if not full_text.strip():
             full_text = result.reason or ""
 
         if full_text.strip():

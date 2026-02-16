@@ -204,6 +204,34 @@ class TestBlogWriterRun:
         assert "Building reliable AI pipelines" in stored_call[0][0][2]
 
     @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
+    def test_run_propose_stores_topic_from_output_when_events_empty(self, _mock_img):
+        """When events is empty, result.output should be used (not result.reason).
+
+        Regression test for #96: codex runner returns LLM text in
+        result.output while events is empty.  Previously
+        _store_proposed_topic fell through to result.reason, storing
+        'completed' as the topic.
+        """
+        agent, runner, memory = self._make_agent()
+        memory.retrieve.return_value = []
+
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            output="Proposed: Better logging for branch fix workflows",
+            events=[],
+        )
+
+        agent.run("/tmp")
+        calls = memory.update_topic.call_args_list
+        stored_call = [c for c in calls if c[0][0] == PROPOSED_TOPIC_KEY]
+        assert len(stored_call) == 1
+        stored_text = stored_call[0][0][2]
+        assert "Better logging for branch fix workflows" in stored_text
+        # Must NOT store the reason string when output is available
+        assert stored_text != "completed"
+
+    @patch("wiz.agents.blog_writer.save_all_image_prompts", return_value=[])
     def test_run_propose_stores_topic_from_reason_fallback(self, _mock_img):
         """If no events, fall back to result.reason for topic text."""
         agent, runner, memory = self._make_agent()
