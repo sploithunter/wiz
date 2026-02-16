@@ -147,7 +147,7 @@ If the fix is inadequate:
 
                 if approved:
                     # Guard: don't create PR for empty branches
-                    changed_files = self._get_branch_files(branch)
+                    changed_files = self._get_branch_files(branch, cwd=cwd)
                     if not changed_files:
                         logger.warning(
                             "Issue #%d: branch %s has no changes, skipping PR",
@@ -184,7 +184,7 @@ If the fix is inadequate:
                     # Check self-improvement guard for protected files
                     needs_human = False
                     if self.guard:
-                        changed_files = self._get_branch_files(branch)
+                        changed_files = self._get_branch_files(branch, cwd=cwd)
                         guard_result = self.guard.validate_changes(changed_files)
                         if guard_result["needs_human_review"]:
                             needs_human = True
@@ -398,17 +398,37 @@ If the fix is inadequate:
         match = re.search(r"/pull/(\d+)", pr_url)
         return int(match.group(1)) if match else None
 
-    def _get_branch_files(self, branch: str) -> list[str]:
-        """Get list of files changed in the branch vs main."""
+    def _get_branch_files(self, branch: str, *, cwd: str | None = None) -> list[str]:
+        """Get list of files changed in the branch vs the default branch."""
         try:
+            base = self._get_default_branch(cwd=cwd)
             result = subprocess.run(
-                ["git", "diff", "--name-only", f"main...{branch}"],
+                ["git", "diff", "--name-only", f"{base}...{branch}"],
                 capture_output=True, text=True, check=True, timeout=10,
+                cwd=cwd,
             )
             return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
             logger.debug("Could not get branch files for %s", branch)
             return []
+
+    @staticmethod
+    def _get_default_branch(*, cwd: str | None = None) -> str:
+        """Detect the default branch for the repository at *cwd*.
+
+        Strategy:
+        1. ``git symbolic-ref refs/remotes/origin/HEAD`` (set by clone/fetch).
+        2. Fall back to ``main``.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+                capture_output=True, text=True, check=True, timeout=5,
+                cwd=cwd,
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+            return "main"
 
     def _escalate(self, issue_number: int, title: str) -> None:
         """Escalate an issue to human review."""

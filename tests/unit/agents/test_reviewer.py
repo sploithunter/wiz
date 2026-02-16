@@ -1,5 +1,6 @@
 """Tests for reviewer agent."""
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -618,3 +619,105 @@ class TestSelfImprovementGuard:
     def test_guard_created_when_self_improve_true(self, tmp_path):
         agent, _, _, _, _ = self._make_agent(tmp_path, self_improve=True)
         assert agent.guard is not None
+
+
+class TestGetBranchFiles:
+    """Regression tests for _get_branch_files (issue #39).
+
+    Verifies that:
+    - cwd is forwarded to subprocess so git runs in the correct repo
+    - The base branch is detected dynamically, not hardcoded to 'main'
+    """
+
+    def _make_agent(self, tmp_path):
+        runner = MagicMock(spec=SessionRunner)
+        config = ReviewerConfig()
+        github = MagicMock(spec=GitHubIssues)
+        prs = MagicMock(spec=GitHubPRs)
+        strikes = StrikeTracker(tmp_path / "strikes.json")
+        loop_tracker = LoopTracker(strikes, max_cycles=3)
+        notifier = MagicMock(spec=TelegramNotifier)
+        return ReviewerAgent(runner, config, github, prs, loop_tracker, notifier)
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_cwd_forwarded_to_subprocess(self, mock_run, tmp_path):
+        """cwd must be passed through to git diff."""
+        agent = self._make_agent(tmp_path)
+        mock_run.return_value = MagicMock(stdout="file_a.py\nfile_b.py\n")
+        result = agent._get_branch_files("fix/1", cwd="/repos/myproject")
+
+        # The git diff call must include cwd
+        diff_call = mock_run.call_args_list[-1]
+        assert diff_call.kwargs.get("cwd") == "/repos/myproject"
+        assert result == ["file_a.py", "file_b.py"]
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_default_branch_detected_from_origin_head(self, mock_run, tmp_path):
+        """When origin/HEAD points to 'master', git diff should use master."""
+        agent = self._make_agent(tmp_path)
+
+        def side_effect(cmd, **kwargs):
+            if "symbolic-ref" in cmd:
+                m = MagicMock()
+                m.stdout = "origin/master\n"
+                return m
+            # git diff call
+            m = MagicMock()
+            m.stdout = "changed.py\n"
+            return m
+
+        mock_run.side_effect = side_effect
+        result = agent._get_branch_files("fix/1", cwd="/repos/myproject")
+
+        assert result == ["changed.py"]
+        # The diff command must use origin/master, not hardcoded main
+        diff_call = mock_run.call_args_list[-1]
+        assert "origin/master...fix/1" in diff_call.args[0]
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_falls_back_to_main_when_symbolic_ref_fails(self, mock_run, tmp_path):
+        """When symbolic-ref fails (no remote), fall back to 'main'."""
+        agent = self._make_agent(tmp_path)
+
+        def side_effect(cmd, **kwargs):
+            if "symbolic-ref" in cmd:
+                raise subprocess.CalledProcessError(1, cmd)
+            m = MagicMock()
+            m.stdout = "changed.py\n"
+            return m
+
+        mock_run.side_effect = side_effect
+        result = agent._get_branch_files("fix/1", cwd="/repos/myproject")
+
+        assert result == ["changed.py"]
+        diff_call = mock_run.call_args_list[-1]
+        assert "main...fix/1" in diff_call.args[0]
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_cwd_forwarded_to_default_branch_detection(self, mock_run, tmp_path):
+        """cwd must also be passed to the symbolic-ref call."""
+        agent = self._make_agent(tmp_path)
+        mock_run.return_value = MagicMock(stdout="file.py\n")
+        agent._get_branch_files("fix/1", cwd="/repos/myproject")
+
+        # First call is symbolic-ref for default branch detection
+        symref_call = mock_run.call_args_list[0]
+        assert symref_call.kwargs.get("cwd") == "/repos/myproject"
+
+
+class TestGetDefaultBranch:
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_returns_origin_head(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="origin/master\n")
+        assert ReviewerAgent._get_default_branch(cwd="/some/repo") == "origin/master"
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_falls_back_to_main(self, mock_run):
+        mock_run.side_effect = subprocess.CalledProcessError(1, "git")
+        assert ReviewerAgent._get_default_branch(cwd="/some/repo") == "main"
+
+    @patch("wiz.agents.reviewer.subprocess.run")
+    def test_passes_cwd(self, mock_run):
+        mock_run.return_value = MagicMock(stdout="main\n")
+        ReviewerAgent._get_default_branch(cwd="/repos/target")
+        assert mock_run.call_args.kwargs.get("cwd") == "/repos/target"
