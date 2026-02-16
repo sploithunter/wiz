@@ -176,6 +176,33 @@ class TestSocialManagerAgent:
         assert result["image_prompts_saved"] == 0
 
     @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
+    def test_run_caps_drafts_to_social_posts_per_week(self, _mock_img):
+        """Regression test for #29: social_posts_per_week must cap created drafts."""
+        typefully = MagicMock(spec=TypefullyClient)
+        typefully.enabled = True
+        typefully.create_draft.return_value = DraftResult(success=True, draft_id=1)
+
+        config = SocialManagerConfig(social_posts_per_week=1)
+        agent, runner, _ = self._make_agent(config, typefully=typefully)
+
+        # LLM returns 3 drafts, but the cap is 1
+        json_output = "\n".join([
+            '```json\n{"draft_title":"a","posts":[{"text":"one"}]}\n```',
+            '```json\n{"draft_title":"b","posts":[{"text":"two"}]}\n```',
+            '```json\n{"draft_title":"c","posts":[{"text":"three"}]}\n```',
+        ])
+        runner.run.return_value = SessionResult(
+            success=True,
+            reason="completed",
+            events=[{"data": {"message": json_output}}],
+        )
+
+        result = agent.run("/tmp")
+        assert result["drafts_parsed"] == 1
+        assert result["drafts_created"] == 1
+        assert typefully.create_draft.call_count == 1
+
+    @patch("wiz.agents.social_manager.save_all_image_prompts", return_value=[])
     def test_run_no_google_docs_when_disabled(self, _mock_img):
         typefully = MagicMock(spec=TypefullyClient)
         typefully.enabled = False

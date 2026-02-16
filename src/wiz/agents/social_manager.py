@@ -141,6 +141,17 @@ Create up to {self.social_config.social_posts_per_week} drafts.
 
         # Parse Claude's JSON output and create Typefully drafts
         drafts_parsed = self._parse_posts_from_result(result)
+
+        # Enforce the weekly post cap — the LLM may produce more drafts than requested
+        cap = self.social_config.social_posts_per_week
+        if len(drafts_parsed) > cap:
+            logger.info(
+                "Capping drafts from %d to %d (social_posts_per_week)",
+                len(drafts_parsed),
+                cap,
+            )
+            drafts_parsed = drafts_parsed[:cap]
+
         draft_results: list[DraftResult] = []
         if drafts_parsed and self.typefully.enabled:
             draft_results = self._create_typefully_drafts(drafts_parsed)
