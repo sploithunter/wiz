@@ -40,6 +40,11 @@ class TestLoadConfig:
         assert cfg.repos[0].self_improve is True
         assert cfg.agents.bug_hunter.model == "codex"
 
+    def test_directory_path_returns_defaults(self, tmp_path: Path):
+        """Regression test for #91: directory path should not raise IsADirectoryError."""
+        cfg = load_config(tmp_path)
+        assert cfg.repos == []
+
     def test_overrides(self, tmp_path: Path):
         config = tmp_path / "custom.yaml"
         config.write_text(
