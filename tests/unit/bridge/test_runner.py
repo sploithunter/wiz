@@ -373,6 +373,36 @@ class TestEnsureHooks:
         # Should still have exactly 1 top-level Stop entry (no duplicate appended)
         assert len(data["hooks"]["Stop"]) == 1
 
+    def test_appended_hook_uses_active_script_path(self, tmp_path):
+        """Appended hook entries must use the current _HOOK_SCRIPT, not a stale default."""
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings = settings_dir / "settings.json"
+
+        hook_script = tmp_path / "hook.sh"
+        hook_script.write_text("#!/bin/bash\n")
+
+        # Start with empty settings — all hooks must be created fresh
+        settings.write_text(json.dumps({}))
+
+        with patch("wiz.bridge.runner._HOOK_SCRIPT", str(hook_script)), \
+             patch("wiz.bridge.runner.Path.home", return_value=tmp_path):
+            result = ensure_hooks()
+
+        assert result is True
+        data = json.loads(settings.read_text())
+
+        # Every required hook type should have exactly 1 entry whose command
+        # matches the active (patched) hook script path, not the default
+        from wiz.bridge.runner import _REQUIRED_HOOKS
+        for event_type in _REQUIRED_HOOKS:
+            entries = data["hooks"][event_type]
+            assert len(entries) == 1, f"{event_type} should have 1 entry"
+            cmds = [c["command"] for c in entries[0]["hooks"]]
+            assert str(hook_script) in cmds, (
+                f"{event_type} hook command should be {hook_script}, got {cmds}"
+            )
+
     def test_returns_false_if_hook_script_missing(self, tmp_path):
         with patch("wiz.bridge.runner._HOOK_SCRIPT", str(tmp_path / "nonexistent.sh")), \
              patch("wiz.bridge.runner.Path.home", return_value=tmp_path):

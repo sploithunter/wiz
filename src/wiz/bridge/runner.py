@@ -27,10 +27,13 @@ _HOOK_SCRIPT = str(Path.home() / ".cin-interface" / "hooks" / "coding-agent-hook
 # Required hook event types for bridge event correlation
 _REQUIRED_HOOKS = ("Stop", "PreToolUse", "PostToolUse", "Notification", "SubagentStop")
 
-_HOOK_ENTRY = {
-    "matcher": "*",
-    "hooks": [{"type": "command", "command": _HOOK_SCRIPT, "timeout": 5}],
-}
+
+def _make_hook_entry(script: str | None = None) -> dict:
+    """Build a hook entry dict using the current _HOOK_SCRIPT value."""
+    return {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": script or _HOOK_SCRIPT, "timeout": 5}],
+    }
 
 
 def ensure_hooks(cwd: str | None = None) -> bool:
@@ -66,7 +69,7 @@ def ensure_hooks(cwd: str | None = None) -> bool:
 
             for event_type in _REQUIRED_HOOKS:
                 if event_type not in hooks:
-                    hooks[event_type] = [_HOOK_ENTRY]
+                    hooks[event_type] = [_make_hook_entry()]
                     changed = True
                 else:
                     # Check if our hook script is already in the list
@@ -77,7 +80,7 @@ def ensure_hooks(cwd: str | None = None) -> bool:
                         for cmd in h.get("hooks", [])
                     ]
                     if _HOOK_SCRIPT not in existing_cmds:
-                        hooks[event_type].append(_HOOK_ENTRY)
+                        hooks[event_type].append(_make_hook_entry())
                         changed = True
 
             if changed:
